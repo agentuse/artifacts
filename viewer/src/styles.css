@@ -90,13 +90,14 @@ html, body, #root {
   color: var(--muted);
   font-size: 14px;
 }
-/* Dotted grid pinned to the viewport (the .canvas-wrap is the un-transformed
-   container). Tiles glide over a static dot field — clearer focus than a
-   grid that scales with zoom. */
+/* Hybrid dot grid: rendered on the un-transformed canvas-wrap so the GPU
+   doesn't repaint a transformed background during pan, but --grid-size and
+   --grid-bg-x/y are fed from the live zoom-pan state in Canvas.tsx so the
+   pattern appears to glide with the canvas and breathe with zoom (Figma). */
 .canvas-wrap {
   background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
-  background-size: 24px 24px;
-  background-position: 0 0;
+  background-size: var(--grid-size, 24px) var(--grid-size, 24px);
+  background-position: var(--grid-bg-x, 0) var(--grid-bg-y, 0);
 }
 .tile {
   position: absolute;

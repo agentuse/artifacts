@@ -83,6 +83,22 @@ export function Canvas(props: {
   // revision switch made from inside the canvas tile.
   const expandedRec = expandedId ? props.manifest.artifacts[expandedId] : undefined;
 
+  // Hybrid grid: dots drawn on the un-transformed canvas-wrap, but their
+  // size/offset is driven by the current pan+scale so they appear to glide
+  // with the canvas (Figma feel) without re-rendering DOM during pan.
+  const updateGrid = (state: { scale: number; positionX: number; positionY: number }) => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const gs = 24 * state.scale;
+    // Modulo into [0, gs) so background-position values stay small and
+    // the pattern wraps continuously instead of drifting forever.
+    const ox = ((state.positionX % gs) + gs) % gs;
+    const oy = ((state.positionY % gs) + gs) % gs;
+    wrap.style.setProperty("--grid-size", `${gs}px`);
+    wrap.style.setProperty("--grid-bg-x", `${ox}px`);
+    wrap.style.setProperty("--grid-bg-y", `${oy}px`);
+  };
+
   if (artifacts.length === 0) {
     return (
       <div className="canvas-wrap" ref={wrapRef}>
@@ -104,6 +120,8 @@ export function Canvas(props: {
         doubleClick={{ disabled: true }}
         panning={{ velocityDisabled: true, wheelPanning: true }}
         limitToBounds={false}
+        onInit={(r) => updateGrid(r.state)}
+        onTransformed={(_r, state) => updateGrid(state)}
       >
         {({ resetTransform, zoomIn, zoomOut }) => (
           <>

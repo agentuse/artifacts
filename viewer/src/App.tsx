@@ -11,10 +11,12 @@ interface Route {
   artifactName?: string;
   revision?: number;
   expandedId?: string;
+  drawerOpen?: boolean;
 }
 
-function parseRoute(pathname: string): Route {
-  const parts = pathname.split("/").filter(Boolean);
+function parseRoute(href: string): Route {
+  const u = new URL(href);
+  const parts = u.pathname.split("/").filter(Boolean);
   const route: Route = {};
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]!;
@@ -25,10 +27,11 @@ function parseRoute(pathname: string): Route {
     if (part === "v" && next) route.revision = parseInt(next, 10);
     if (part === "f" && next) route.expandedId = decodeURIComponent(next);
   }
+  if (u.searchParams.get("d") === "1") route.drawerOpen = true;
   return route;
 }
 
-function pushRoute(r: Route): void {
+function navRoute(r: Route, replace = false): void {
   const parts: string[] = [];
   if (r.projectId) parts.push("p", encodeURIComponent(r.projectId));
   if (r.runId) {
@@ -38,15 +41,17 @@ function pushRoute(r: Route): void {
     if (r.revision != null) parts.push("v", String(r.revision));
   }
   if (r.expandedId) parts.push("f", encodeURIComponent(r.expandedId));
-  const path = "/" + parts.join("/");
-  if (path !== window.location.pathname) {
-    window.history.pushState({}, "", path);
+  const path = "/" + parts.join("/") + (r.drawerOpen ? "?d=1" : "");
+  const cur = window.location.pathname + window.location.search;
+  if (path !== cur) {
+    if (replace) window.history.replaceState({}, "", path);
+    else window.history.pushState({}, "", path);
   }
 }
 
 export function App() {
   const [manifest, setManifest] = useState<Manifest | null>(null);
-  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.href));
 
   // Initial fetch + 2s polling per spec.
   useEffect(() => {
@@ -68,7 +73,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const onPop = () => setRoute(parseRoute(window.location.pathname));
+    const onPop = () => setRoute(parseRoute(window.location.href));
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
@@ -88,7 +93,7 @@ export function App() {
       const firstRun = runs[0]?.[0];
       const next: Route = { projectId: first, runId: firstRun };
       setRoute(next);
-      pushRoute(next);
+      navRoute(next);
     }
   }, [manifest, route.projectId]);
 
@@ -116,9 +121,9 @@ export function App() {
     return Object.values(latestMap)
       .map((id) => [id, manifest.artifacts[id]] as [string, ArtifactRecord | undefined])
       .filter((e): e is [string, ArtifactRecord] => !!e[1]);
-  }, [manifest, route]);
+  }, [manifest, route.projectId, route.runId, route.artifactName, route.revision]);
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerOpen = !!route.drawerOpen;
 
   const onSelectProject = (projectId: string) => {
     if (!manifest) return;
@@ -128,22 +133,32 @@ export function App() {
         (a, b) =>
           new Date(b[1].createdAt).getTime() - new Date(a[1].createdAt).getTime(),
       );
-    const next: Route = { projectId, runId: runs[0]?.[0] };
+    const next: Route = { projectId, runId: runs[0]?.[0], drawerOpen: route.drawerOpen };
     setRoute(next);
-    pushRoute(next);
+    navRoute(next);
   };
 
   const onSelectRun = (runId: string) => {
+    // Close the drawer on a run pick (navigation is intentional, the user
+    // wants the canvas next). Use replace so the closing isn't a history step.
     const next: Route = { projectId: route.projectId, runId };
     setRoute(next);
-    pushRoute(next);
-    setDrawerOpen(false);
+    navRoute(next);
   };
 
   const onExpandedChange = (id: string | null) => {
+    // Fullscreen toggle is transient UI — replaceState so back/forward
+    // doesn't flip-flop through every expand/collapse.
     const next: Route = { ...route, expandedId: id ?? undefined };
     setRoute(next);
-    pushRoute(next);
+    navRoute(next, true);
+  };
+
+  const setDrawerOpen = (open: boolean) => {
+    // Drawer toggle is transient too.
+    const next: Route = { ...route, drawerOpen: open || undefined };
+    setRoute(next);
+    navRoute(next, true);
   };
 
   if (!manifest) {
@@ -154,7 +169,7 @@ export function App() {
     <div className={"app" + (drawerOpen ? " drawer-open" : "")}>
       <button
         className="menu-btn"
-        onClick={() => setDrawerOpen((o) => !o)}
+        onClick={() => setDrawerOpen(!drawerOpen)}
         aria-label={drawerOpen ? "close menu" : "open menu"}
       >
         {drawerOpen ? "✕" : "☰"}
