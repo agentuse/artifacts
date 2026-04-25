@@ -1,5 +1,9 @@
-import { useState } from "react";
-import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
+import { useEffect, useRef, useState } from "react";
+import {
+  TransformWrapper,
+  TransformComponent,
+  type ReactZoomPanPinchRef,
+} from "react-zoom-pan-pinch";
 import type { ArtifactRecord, Manifest } from "../types";
 import { Tile } from "./Tile";
 
@@ -25,23 +29,79 @@ export function Canvas(props: {
   const canvasW = COLS * (TILE_W + GAP) + GAP;
   const canvasH = rows * (TILE_H + GAP) + GAP;
 
+  // iPad Safari fires gesturestart/change/end for trackpad pinch. We cancel
+  // them so Safari doesn't try to page-zoom the SPA. NOTE: iPadOS captures
+  // multi-finger trackpad pinch at the system level (Stage Manager / tab
+  // overview) BEFORE the page sees the event — we cannot suppress that. Use
+  // Cmd+= / Cmd+- / Cmd+0 (wired below) or the on-canvas toolbar instead.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const transformRef = useRef<ReactZoomPanPinchRef>(null);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const stop = (e: Event) => e.preventDefault();
+    const opts: AddEventListenerOptions = { passive: false };
+    el.addEventListener("gesturestart", stop, opts);
+    el.addEventListener("gesturechange", stop, opts);
+    el.addEventListener("gestureend", stop, opts);
+    return () => {
+      el.removeEventListener("gesturestart", stop, opts);
+      el.removeEventListener("gesturechange", stop, opts);
+      el.removeEventListener("gestureend", stop, opts);
+    };
+  }, []);
+
+  // Cmd/Ctrl + (= or +) / - / 0 → zoom in / out / reset. Provides a reliable
+  // zoom path on iPad where trackpad pinch is eaten by the OS.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && expandedId) {
+        setExpandedId(null);
+        return;
+      }
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const r = transformRef.current;
+      if (!r) return;
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        r.zoomIn();
+      } else if (e.key === "-") {
+        e.preventDefault();
+        r.zoomOut();
+      } else if (e.key === "0") {
+        e.preventDefault();
+        r.resetTransform();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expandedId]);
+
+  // Resolve the expanded record from the manifest so the overlay survives a
+  // revision switch made from inside the canvas tile.
+  const expandedRec = expandedId ? props.manifest.artifacts[expandedId] : undefined;
+
   if (artifacts.length === 0) {
     return (
-      <div className="canvas-wrap">
+      <div className="canvas-wrap" ref={wrapRef}>
         <div className="empty">no artifacts in this run</div>
       </div>
     );
   }
 
   return (
-    <div className="canvas-wrap">
+    <div className="canvas-wrap" ref={wrapRef}>
       <TransformWrapper
+        ref={transformRef}
         initialScale={1}
         minScale={0.2}
         maxScale={4}
-        wheel={{ step: 0.15 }}
+        // wheelDisabled blocks plain-wheel zoom but still allows ctrlKey wheel
+        // (trackpad pinch). wheelPanning then turns plain scroll into a pan.
+        wheel={{ step: 0.15, wheelDisabled: true }}
         doubleClick={{ disabled: true }}
-        panning={{ velocityDisabled: true }}
+        panning={{ velocityDisabled: true, wheelPanning: true }}
         limitToBounds={false}
       >
         {({ resetTransform, zoomIn, zoomOut }) => (
@@ -55,7 +115,10 @@ export function Canvas(props: {
               wrapperStyle={{ width: "100%", height: "100%" }}
               contentStyle={{ width: canvasW, height: canvasH }}
             >
-              <div style={{ position: "relative", width: canvasW, height: canvasH }}>
+              <div
+                className="canvas-grid"
+                style={{ position: "relative", width: canvasW, height: canvasH }}
+              >
                 {tiles.map(({ id, rec, x, y }) => (
                   <TileWrapper
                     key={id}
@@ -66,6 +129,7 @@ export function Canvas(props: {
                     y={y}
                     w={TILE_W}
                     h={TILE_H}
+                    onExpand={() => setExpandedId(id)}
                   />
                 ))}
               </div>
@@ -73,19 +137,30 @@ export function Canvas(props: {
           </>
         )}
       </TransformWrapper>
+      {expandedId && expandedRec && (
+        <TileWrapper
+          key={"expanded-" + expandedId}
+          artifactId={expandedId}
+          record={expandedRec}
+          manifest={props.manifest}
+          expanded
+          onClose={() => setExpandedId(null)}
+        />
+      )}
     </div>
   );
 }
 
-function TileWrapper(props: {
+type TileWrapperProps = {
   artifactId: string;
   record: ArtifactRecord;
   manifest: Manifest;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}) {
+} & (
+  | { expanded?: false; x: number; y: number; w: number; h: number; onExpand: () => void; onClose?: never }
+  | { expanded: true; onClose: () => void; onExpand?: never; x?: never; y?: never; w?: never; h?: never }
+);
+
+function TileWrapper(props: TileWrapperProps) {
   const [overrideId, setOverrideId] = useState<string | null>(null);
   const showId = overrideId ?? props.artifactId;
   const showRec = props.manifest.artifacts[showId] ?? props.record;
@@ -98,10 +173,14 @@ function TileWrapper(props: {
     )
     .sort((a, b) => b[1].revision - a[1].revision);
 
+  const tileStyle = props.expanded
+    ? undefined
+    : { left: props.x, top: props.y, width: props.w, height: props.h };
+
   return (
     <div
-      className="tile"
-      style={{ left: props.x, top: props.y, width: props.w, height: props.h }}
+      className={"tile" + (props.expanded ? " tile-expanded" : "")}
+      style={tileStyle}
     >
       <div className="tile-head">
         <span className="name">{showRec.name}</span>
@@ -117,6 +196,25 @@ function TileWrapper(props: {
             ))}
           </select>
         </span>
+        {props.expanded ? (
+          <button
+            className="icon-btn"
+            onClick={props.onClose}
+            aria-label="exit fullscreen"
+            title="exit fullscreen (esc)"
+          >
+            ✕
+          </button>
+        ) : (
+          <button
+            className="icon-btn"
+            onClick={props.onExpand}
+            aria-label="fullscreen"
+            title="fullscreen"
+          >
+            ⤢
+          </button>
+        )}
       </div>
       <Tile artifactId={showId} type={showRec.type} />
     </div>

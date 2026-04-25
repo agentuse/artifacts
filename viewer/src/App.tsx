@@ -114,6 +114,8 @@ export function App() {
       .filter((e): e is [string, ArtifactRecord] => !!e[1]);
   }, [manifest, route]);
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   const onSelectProject = (projectId: string) => {
     if (!manifest) return;
     const runs = Object.entries(manifest.runs)
@@ -131,6 +133,7 @@ export function App() {
     const next: Route = { projectId: route.projectId, runId };
     setRoute(next);
     pushRoute(next);
+    setDrawerOpen(false);
   };
 
   if (!manifest) {
@@ -138,18 +141,28 @@ export function App() {
   }
 
   return (
-    <div className="app">
-      <Sidebar
-        projects={manifest.projects}
-        selected={route.projectId}
-        onSelect={onSelectProject}
-      />
-      <RunList
-        manifest={manifest}
-        projectId={route.projectId}
-        selected={route.runId}
-        onSelect={onSelectRun}
-      />
+    <div className={"app" + (drawerOpen ? " drawer-open" : "")}>
+      <button
+        className="menu-btn"
+        onClick={() => setDrawerOpen((o) => !o)}
+        aria-label={drawerOpen ? "close menu" : "open menu"}
+      >
+        {drawerOpen ? "✕" : "☰"}
+      </button>
+      <div className="drawer">
+        <Sidebar
+          projects={manifest.projects}
+          selected={route.projectId}
+          onSelect={onSelectProject}
+        />
+        <RunList
+          manifest={manifest}
+          projectId={route.projectId}
+          selected={route.runId}
+          onSelect={onSelectRun}
+        />
+      </div>
+      <div className="backdrop" onClick={() => setDrawerOpen(false)} />
       <Canvas
         manifest={manifest}
         artifacts={selectedArtifacts}

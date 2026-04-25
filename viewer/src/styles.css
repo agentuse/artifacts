@@ -6,6 +6,7 @@
   --accent: #c2410c;
   --tile-bg: #ffffff;
   --pane-bg: #f5f5f4;
+  --grid-dot: rgba(0, 0, 0, 0.12);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -16,6 +17,7 @@
     --accent: #fb923c;
     --tile-bg: #1c1917;
     --pane-bg: #292524;
+    --grid-dot: rgba(255, 255, 255, 0.10);
   }
 }
 * { box-sizing: border-box; }
@@ -33,6 +35,11 @@ html, body, #root {
   height: 100vh;
   overflow: hidden;
 }
+/* In wide layout the drawer is "transparent" — its children become direct
+   grid items so the layout matches the original 3-pane design. */
+.drawer { display: contents; }
+.menu-btn,
+.backdrop { display: none; }
 .pane {
   border-right: 1px solid var(--border);
   background: var(--pane-bg);
@@ -62,7 +69,15 @@ html, body, #root {
 .list-item:hover { background: rgba(127,127,127,0.08); }
 .list-item.selected { background: rgba(194,65,12,0.10); border-left: 3px solid var(--accent); padding-left: 13px; }
 .list-item .secondary { color: var(--muted); font-size: 11px; margin-top: 2px; word-break: break-all; }
-.canvas-wrap { position: relative; overflow: hidden; background: var(--bg); }
+.canvas-wrap {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  /* Page pinch-zoom is already blocked via the viewport meta. Don't set
+     touch-action: none here — it cascades through the ancestor chain and
+     would kill native scroll inside iframe artifacts on iPad Safari. */
+  overscroll-behavior: contain;
+}
 .canvas {
   width: 100%;
   height: 100%;
@@ -75,6 +90,13 @@ html, body, #root {
   color: var(--muted);
   font-size: 14px;
 }
+/* Figma-style dotted grid. Sits on the inner canvas content, so it scales
+   and pans with the zoom transform (the dots feel anchored to the canvas). */
+.canvas-grid {
+  background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
+  background-size: 24px 24px;
+  background-position: 0 0;
+}
 .tile {
   position: absolute;
   background: var(--tile-bg);
@@ -85,6 +107,29 @@ html, body, #root {
   display: flex;
   flex-direction: column;
 }
+/* Fullscreen overlay: pinned to the viewport, not affected by zoom-pan. */
+.tile.tile-expanded {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  z-index: 200;
+}
+.icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--muted);
+  margin-left: 6px;
+}
+.icon-btn:hover { color: var(--accent); border-color: var(--accent); }
 .tile-head {
   display: flex;
   align-items: center;
@@ -156,3 +201,70 @@ html, body, #root {
   color: inherit;
 }
 .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---- Narrow viewports (iPad portrait, split view, phones) ---- */
+@media (max-width: 900px) {
+  .app {
+    display: block;
+    position: relative;
+  }
+  .canvas-wrap {
+    width: 100%;
+    height: 100vh;
+  }
+  /* Drawer overlays from the left, holds Sidebar + RunList stacked. */
+  .drawer {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(360px, 85vw);
+    z-index: 100;
+    background: var(--pane-bg);
+    border-right: 1px solid var(--border);
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.18);
+  }
+  .app.drawer-open .drawer { transform: translateX(0); }
+  .drawer .pane {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .drawer .pane:first-child {
+    flex: 0 0 auto;
+    max-height: 40vh;
+  }
+  .drawer .pane:last-child {
+    flex: 1 1 auto;
+    border-bottom: none;
+    min-height: 0;
+  }
+  .menu-btn {
+    display: block;
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 101;
+    background: var(--tile-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    color: inherit;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+  .app.drawer-open .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 99;
+  }
+  /* Avoid colliding with the menu button. */
+  .toolbar { top: 10px; right: 10px; }
+}
