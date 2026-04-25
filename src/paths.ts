@@ -16,9 +16,6 @@ export function lockPath(): string {
 export function filesDir(): string {
   return path.join(rootDir(), "files");
 }
-export function sessionsDir(): string {
-  return path.join(rootDir(), "sessions");
-}
 export function servePidPath(): string {
   return path.join(rootDir(), ".serve.pid");
 }

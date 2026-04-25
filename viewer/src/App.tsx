@@ -78,20 +78,15 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // Default selection on first manifest load.
+  // Default selection on first manifest load: just the project. Run is now
+  // an optional filter, not the primary lens, so we land on "all latest
+  // artifacts" (project home) rather than auto-picking a run.
   useEffect(() => {
     if (!manifest || route.projectId) return;
     const projectIds = Object.keys(manifest.projects);
     const first = projectIds[0];
     if (first) {
-      const runs = Object.entries(manifest.runs)
-        .filter(([, r]) => r.projectId === first)
-        .sort(
-          (a, b) =>
-            new Date(b[1].createdAt).getTime() - new Date(a[1].createdAt).getTime(),
-        );
-      const firstRun = runs[0]?.[0];
-      const next: Route = { projectId: first, runId: firstRun };
+      const next: Route = { projectId: first };
       setRoute(next);
       navRoute(next);
     }
@@ -127,20 +122,15 @@ export function App() {
 
   const onSelectProject = (projectId: string) => {
     if (!manifest) return;
-    const runs = Object.entries(manifest.runs)
-      .filter(([, r]) => r.projectId === projectId)
-      .sort(
-        (a, b) =>
-          new Date(b[1].createdAt).getTime() - new Date(a[1].createdAt).getTime(),
-      );
-    const next: Route = { projectId, runId: runs[0]?.[0], drawerOpen: route.drawerOpen };
+    // Land on project home (all latest), not a specific run.
+    const next: Route = { projectId, drawerOpen: route.drawerOpen };
     setRoute(next);
     navRoute(next);
   };
 
-  const onSelectRun = (runId: string) => {
-    // Close the drawer on a run pick (navigation is intentional, the user
-    // wants the canvas next). Use replace so the closing isn't a history step.
+  const onSelectRun = (runId: string | undefined) => {
+    // undefined = "Latest" pseudo-entry: clear the run filter and land on
+    // the project's all-latest view.
     const next: Route = { projectId: route.projectId, runId };
     setRoute(next);
     navRoute(next);

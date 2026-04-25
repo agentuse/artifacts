@@ -14,45 +14,57 @@ function fmtDate(iso: string): string {
   }
 }
 
+/**
+ * Run is an optional grouping tag. The default lens is "all latest artifacts
+ * in the project," shown as the "Latest" pseudo-entry. Run rows only appear
+ * when the project actually has tagged runs, keeping the panel quiet for
+ * agents that never opt in.
+ */
 export function RunList(props: {
   manifest: Manifest;
   projectId?: string;
   selected?: string;
-  onSelect: (runId: string) => void;
+  onSelect: (runId: string | undefined) => void;
 }) {
-  if (!props.projectId) {
+  const { manifest, projectId, selected, onSelect } = props;
+  if (!projectId) {
     return (
       <div className="pane">
         <h2>Runs</h2>
-        <div className="list-item secondary">select a project</div>
+        <div className="list-item secondary">pick a project</div>
       </div>
     );
   }
-  const runs = Object.entries(props.manifest.runs)
-    .filter(([, r]) => r.projectId === props.projectId)
-    .sort(
-      (a, b) => new Date(b[1].createdAt).getTime() - new Date(a[1].createdAt).getTime(),
-    );
 
-  const counts = new Map<string, number>();
-  for (const a of Object.values(props.manifest.artifacts)) {
-    counts.set(a.runId, (counts.get(a.runId) ?? 0) + 1);
-  }
+  const runs = Object.entries(manifest.runs)
+    .filter(([, r]) => r.projectId === projectId)
+    .sort(
+      (a, b) =>
+        new Date(b[1].createdAt).getTime() - new Date(a[1].createdAt).getTime(),
+    );
 
   return (
     <div className="pane">
-      <h2>Runs</h2>
-      {runs.length === 0 && <div className="list-item secondary">no runs yet</div>}
+      <h2>Runs (filter)</h2>
+      <div
+        className={`list-item${selected == null ? " selected" : ""}`}
+        onClick={() => onSelect(undefined)}
+      >
+        <div>Latest</div>
+        <div className="secondary">all artifacts in project</div>
+      </div>
+      {runs.length === 0 && (
+        <div className="list-item secondary">no tagged runs</div>
+      )}
       {runs.map(([id, r]) => (
         <div
           key={id}
-          className={`list-item${id === props.selected ? " selected" : ""}`}
-          onClick={() => props.onSelect(id)}
+          className={`list-item${id === selected ? " selected" : ""}`}
+          onClick={() => onSelect(id)}
+          title={id}
         >
-          <div>{r.label ?? fmtDate(r.createdAt)}</div>
-          <div className="secondary">
-            {fmtDate(r.createdAt)} · {counts.get(id) ?? 0} artifact(s)
-          </div>
+          <div>{id}</div>
+          <div className="secondary">{fmtDate(r.createdAt)}</div>
         </div>
       ))}
     </div>

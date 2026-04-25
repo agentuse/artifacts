@@ -14,13 +14,14 @@ export interface ProjectRecord {
 
 export interface RunRecord {
   projectId: string;
-  label?: string;
   createdAt: string;
 }
 
 export interface ArtifactRecord {
   projectId: string;
-  runId: string;
+  /** Optional run tag. Present only when the caller explicitly grouped this
+   *  artifact via `--run <tag>` or the `AGENTUSE_RUN_ID` env var. */
+  runId?: string;
   name: string;
   type: "markdown" | "html";
   revision: number;

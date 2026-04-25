@@ -10,10 +10,10 @@ import {
   removeRevision,
   revertArtifact,
   viewerArtifactUrl,
+  viewerProjectUrl,
   viewerRunUrl,
 } from "./artifacts.js";
 import { rootDir } from "./paths.js";
-import { readManifest } from "./manifest.js";
 import { resolveProject } from "./project.js";
 import {
   DEFAULT_PORT,
@@ -80,8 +80,11 @@ export async function runCli(argv: string[]): Promise<void> {
     .description("Add (auto-version) one or more artifacts")
     .argument("<sources...>", 'file paths, or "-" for stdin (one source only)')
     .option("--name <name>", "explicit logical name (required for stdin)")
-    .option("--label <label>", "label for the auto-created run")
-    .option("--new-run", "force a new run even if a session is active")
+    .option(
+      "--run <tag>",
+      "tag this batch with a run (same tag = same run; default is untagged). " +
+        "Also reads AGENTUSE_RUN_ID from env.",
+    )
     .option("--force-revision", "create a new revision even on identical hash")
     .option("--max-size <bytes>", `per-artifact byte cap (default ${DEFAULT_MAX_SIZE})`)
     .action(async (sources: string[], opts: Record<string, string | boolean>) => {
@@ -93,17 +96,19 @@ export async function runCli(argv: string[]): Promise<void> {
         const maxSize = opts["max-size"]
           ? parseInt(String(opts["max-size"]), 10)
           : DEFAULT_MAX_SIZE;
+        const run = typeof opts.run === "string" ? opts.run : undefined;
         const inputs: AddInput[] = sources.map((source) => ({
           source,
           name: typeof opts.name === "string" ? opts.name : undefined,
-          label: typeof opts.label === "string" ? opts.label : undefined,
-          newRun: !!opts["new-run"],
+          run,
           forceRevision: !!opts["force-revision"],
           maxSize,
         }));
         const out = await addArtifacts(inputs);
         const port = isServerRunning()?.port ?? DEFAULT_PORT;
-        const viewerUrl = viewerRunUrl({ port }, out.project.projectId, out.runId);
+        const viewerUrl = out.runId
+          ? viewerRunUrl({ port }, out.project.projectId, out.runId)
+          : viewerProjectUrl({ port }, out.project.projectId);
 
         emit(
           global.json,
@@ -115,9 +120,8 @@ export async function runCli(argv: string[]): Promise<void> {
           },
           () => {
             human(`✓ Project: ${out.project.name} (${out.project.path})`);
-            human(`✓ Run: ${out.runId}`);
+            if (out.runId) human(`✓ Run: ${out.runId}`);
             const real = out.results.filter((r) => !r.skipped);
-            const skipped = out.results.filter((r) => r.skipped);
             if (real.length > 0) human(`✓ Added ${real.length} artifact(s)`);
             for (const r of out.results) {
               const tag = r.skipped
@@ -128,9 +132,6 @@ export async function runCli(argv: string[]): Promise<void> {
               human(
                 `  • ${r.name}  v${r.revision}  ${fmtSize(r.size)}  ${r.artifactId}  (${tag})`,
               );
-            }
-            if (skipped.length === out.results.length && out.results.length > 0) {
-              // already covered per-line
             }
             human(`→ ${viewerUrl}`);
           },
@@ -166,8 +167,9 @@ export async function runCli(argv: string[]): Promise<void> {
             }
             for (const it of items) {
               const tag = it.isLatest ? "latest" : "      ";
+              const runTag = it.record.runId ? `  run=${it.record.runId}` : "";
               human(
-                `  ${tag}  ${it.record.name}  v${it.record.revision}  ${fmtSize(it.record.size)}  ${it.artifactId}  run=${it.record.runId}`,
+                `  ${tag}  ${it.record.name}  v${it.record.revision}  ${fmtSize(it.record.size)}  ${it.artifactId}${runTag}`,
               );
             }
           },
@@ -179,9 +181,13 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .command("url")
-    .description("Print viewer URL for the current run, or for a named artifact")
+    .description(
+      "Print viewer URL: project home by default, an artifact when name is given, " +
+        "a run when --run is given.",
+    )
     .argument("[name]", "artifact name (latest revision unless --revision)")
     .option("--revision <n>", "specific revision number")
+    .option("--run <tag>", "show URL for a specific run tag")
     .action((name: string | undefined, opts: Record<string, string>) => {
       const global = program.opts<GlobalOpts>();
       try {
@@ -191,21 +197,10 @@ export async function runCli(argv: string[]): Promise<void> {
         if (name) {
           const rev = opts.revision ? parseInt(opts.revision, 10) : undefined;
           url = viewerArtifactUrl({ port }, project.projectId, name, rev);
+        } else if (opts.run) {
+          url = viewerRunUrl({ port }, project.projectId, opts.run);
         } else {
-          // Current run from manifest if any.
-          const manifest = readManifest();
-          const runs = Object.entries(manifest.runs).filter(
-            ([, r]) => r.projectId === project.projectId,
-          );
-          runs.sort(
-            (a, b) =>
-              new Date(b[1].createdAt).getTime() - new Date(a[1].createdAt).getTime(),
-          );
-          const latestRun = runs[0]?.[0];
-          if (!latestRun) {
-            throw new CliError("NOT_FOUND", "no runs for current project");
-          }
-          url = viewerRunUrl({ port }, project.projectId, latestRun);
+          url = viewerProjectUrl({ port }, project.projectId);
         }
         emit(global.json, { url }, () => human(url));
       } catch (e) {

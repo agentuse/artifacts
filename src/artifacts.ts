@@ -16,7 +16,6 @@ import {
 import { sha256, shortId } from "./hash.js";
 import { extFromType, inferType, resolveLogicalName } from "./validation.js";
 import { ProjectInfo, resolveProject } from "./project.js";
-import { getCachedRunId, setCachedRunId } from "./session.js";
 
 export const DEFAULT_MAX_SIZE = 5 * 1024 * 1024;
 
@@ -27,10 +26,9 @@ export interface AddInput {
   name?: string;
   /** Force a new revision even on identical hash. */
   forceRevision?: boolean;
-  /** Optional run label set on first creation in this run. */
-  label?: string;
-  /** Bypass any cached run and create a new one. */
-  newRun?: boolean;
+  /** Optional run tag. The string is the tag's identity within the project:
+   *  same string = same run, fresh string = fresh run. Absent = untagged. */
+  run?: string;
   /** Override max-size (bytes). */
   maxSize?: number;
 }
@@ -49,7 +47,8 @@ export interface AddResult {
 
 export interface AddBatchResult {
   project: ProjectInfo;
-  runId: string;
+  /** The run tag applied to this batch, if any. */
+  runId?: string;
   results: AddResult[];
 }
 
@@ -124,7 +123,11 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
   }
 
   const results: AddResult[] = [];
-  let runId = "";
+  let runId: string | undefined;
+
+  // A batch is tagged with at most one run. Prefer the first explicit --run
+  // value among the inputs, else the env var. No implicit auto-run.
+  const explicitRun = inputs.find((i) => i.run)?.run;
 
   await withLock(async () => {
     const manifest = readManifest();
@@ -133,8 +136,7 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
     runId = resolveRunId({
       manifest,
       projectId: project.projectId,
-      forceNew: inputs.some((i) => i.newRun) || false,
-      label: inputs.find((i) => i.label)?.label,
+      explicit: explicitRun,
     });
 
     for (const p of prepared) {
@@ -175,7 +177,7 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
 
       const record: ArtifactRecord = {
         projectId: project.projectId,
-        runId,
+        ...(runId ? { runId } : {}),
         name: p.name,
         type: p.type,
         revision,
@@ -204,41 +206,28 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
     writeManifestAtomic(manifest);
   });
 
-  setCachedRunId(project.projectId, runId);
-
   return { project, runId, results };
 }
 
+/** The run tag is whatever string the user supplied (--run or env). Same
+ *  string = same tag (reuse). New string = new tag (create record). No
+ *  auto-tagging when neither is supplied. */
 function resolveRunId(opts: {
   manifest: Manifest;
   projectId: string;
-  forceNew: boolean;
-  label?: string;
-}): string {
-  const { manifest, projectId, forceNew, label } = opts;
-  if (!forceNew) {
-    const env = process.env.AGENTUSE_RUN_ID;
-    if (env && manifest.runs[env]) return env;
-    if (env) {
-      // Env-supplied id: create the record if missing.
-      manifest.runs[env] = {
-        projectId,
-        label,
-        createdAt: new Date().toISOString(),
-      };
-      return env;
-    }
-    const cached = getCachedRunId(projectId);
-    if (cached && manifest.runs[cached]) return cached;
+  explicit?: string;
+}): string | undefined {
+  const { manifest, projectId, explicit } = opts;
+  const tag = explicit ?? process.env.AGENTUSE_RUN_ID;
+  if (!tag) return undefined;
+  if (!manifest.runs[tag]) {
+    const rec: RunRecord = {
+      projectId,
+      createdAt: new Date().toISOString(),
+    };
+    manifest.runs[tag] = rec;
   }
-  const id = shortId("run");
-  const rec: RunRecord = {
-    projectId,
-    label,
-    createdAt: new Date().toISOString(),
-  };
-  manifest.runs[id] = rec;
-  return id;
+  return tag;
 }
 
 // ---------- list ----------
@@ -353,15 +342,16 @@ export async function revertArtifact(opts: {
     const newPath = artifactFilePath(project.projectId, newId, ext);
     fs.copyFileSync(sourcePath, newPath);
 
+    // Revert is administrative; only inherits a run tag if the env var is
+    // set. No implicit re-tagging from the source revision.
     const runId = resolveRunId({
       manifest,
       projectId: project.projectId,
-      forceNew: false,
     });
 
     const record: ArtifactRecord = {
       projectId: project.projectId,
-      runId,
+      ...(runId ? { runId } : {}),
       name: opts.name,
       type: target.record.type,
       revision,
@@ -514,8 +504,12 @@ export interface ViewerLocation {
   port: number;
 }
 
+export function viewerProjectUrl(loc: ViewerLocation, projectId: string): string {
+  return `http://127.0.0.1:${loc.port}/p/${projectId}`;
+}
+
 export function viewerRunUrl(loc: ViewerLocation, projectId: string, runId: string): string {
-  return `http://127.0.0.1:${loc.port}/p/${projectId}/r/${runId}`;
+  return `http://127.0.0.1:${loc.port}/p/${projectId}/r/${encodeURIComponent(runId)}`;
 }
 
 export function viewerArtifactUrl(
