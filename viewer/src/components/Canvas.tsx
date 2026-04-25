@@ -11,6 +11,9 @@ const TILE_W = 720;
 const TILE_H = 720;
 const GAP = 32;
 const COLS = 2;
+const MIN_SCALE = 0.2;
+const MAX_SCALE = 4;
+const FIT_PADDING = 24;
 
 export function Canvas(props: {
   manifest: Manifest;
@@ -53,7 +56,38 @@ export function Canvas(props: {
     };
   }, []);
 
-  // Cmd/Ctrl + (= or +) / - / 0 → zoom in / out / reset. Provides a reliable
+  // Compute the transform that fits the entire content rect into the viewport
+  // (with padding) and centers it. resetTransform is "scale 1, origin (0,0)"
+  // and overflows on most viewports, which isn't what "fit" means.
+  const fitToContent = () => {
+    const r = transformRef.current;
+    const wrap = wrapRef.current;
+    if (!r || !wrap) return;
+    const vw = wrap.clientWidth;
+    const vh = wrap.clientHeight;
+    if (vw <= 0 || vh <= 0) return;
+    const usableW = Math.max(1, vw - FIT_PADDING * 2);
+    const usableH = Math.max(1, vh - FIT_PADDING * 2);
+    const ideal = Math.min(usableW / canvasW, usableH / canvasH);
+    // Don't zoom past 1x for small content (prevents huge upscaling on a
+    // single tile); clamp to the wrapper's own scale bounds otherwise.
+    const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min(1, ideal)));
+    const px = (vw - canvasW * scale) / 2;
+    const py = (vh - canvasH * scale) / 2;
+    r.setTransform(px, py, scale, 200);
+  };
+
+  // Auto-fit on mount and whenever the content rect changes (artifact count
+  // change, or the artifact set itself swapped because of a route change).
+  useEffect(() => {
+    // Defer one frame so TransformWrapper's onInit has wired up the ref and
+    // the wrapper has its real layout size.
+    const id = requestAnimationFrame(() => fitToContent());
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasW, canvasH, artifacts.length]);
+
+  // Cmd/Ctrl + (= or +) / - / 0 → zoom in / out / fit. Provides a reliable
   // zoom path on iPad where trackpad pinch is eaten by the OS.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -72,11 +106,12 @@ export function Canvas(props: {
         r.zoomOut();
       } else if (e.key === "0") {
         e.preventDefault();
-        r.resetTransform();
+        fitToContent();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedId, onExpandedChange]);
 
   // Resolve the expanded record from the manifest so the overlay survives a
@@ -112,8 +147,8 @@ export function Canvas(props: {
       <TransformWrapper
         ref={transformRef}
         initialScale={1}
-        minScale={0.2}
-        maxScale={4}
+        minScale={MIN_SCALE}
+        maxScale={MAX_SCALE}
         // wheelDisabled blocks plain-wheel zoom but still allows ctrlKey wheel
         // (trackpad pinch). wheelPanning then turns plain scroll into a pan.
         wheel={{ step: 0.15, wheelDisabled: true }}
@@ -123,11 +158,11 @@ export function Canvas(props: {
         onInit={(r) => updateGrid(r.state)}
         onTransformed={(_r, state) => updateGrid(state)}
       >
-        {({ resetTransform, zoomIn, zoomOut }) => (
+        {({ zoomIn, zoomOut }) => (
           <>
             <div className="toolbar">
               <button onClick={() => zoomOut()}>−</button>
-              <button onClick={() => resetTransform()}>fit</button>
+              <button onClick={fitToContent}>fit</button>
               <button onClick={() => zoomIn()}>+</button>
             </div>
             <TransformComponent
