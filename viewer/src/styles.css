@@ -159,6 +159,58 @@ html, body, #root {
   font: inherit;
   cursor: pointer;
 }
+.tile-body-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tile-body-wrap > .tile-body { flex: 1; }
+/* Preview tile: no chrome, body is non-interactive. pointer-events: none
+   on .tile-body causes hit-testing to skip the iframe element entirely
+   (events to an iframe's document have to enter through the iframe element
+   first), so the artifact never sees the touch — bulletproof on iOS Safari
+   where transparent-overlay stacking is unreliable. The wrap above remains
+   pointer-events: auto and catches the tap that promotes to focused. */
+.tile.tile-preview .tile-body {
+  pointer-events: none;
+}
+.tile.tile-preview .tile-body-wrap {
+  cursor: zoom-in;
+}
+.tile.tile-focused {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+/* Floating head: rendered as a sibling of TransformWrapper inside
+   .canvas-wrap, so it lives in screen space and stays readable at any
+   zoom. Position is set imperatively from Canvas.tsx (see
+   positionFloatingHead). Keep height in sync with FLOATING_HEAD_H there. */
+.tile-head-floating {
+  position: absolute;
+  height: 32px;
+  z-index: 50;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--pane-bg);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  /* Override .tile-head's bottom border (we share the class for styling
+     of name/rev/icon-btn, but the floating variant is a free-standing pill,
+     not the top edge of a tile). */
+  border-bottom: 1px solid var(--border);
+  /* Truncate the name when the tile is narrow (zoomed out); the controls
+     on the right keep their natural size. */
+  min-width: 0;
+}
+.tile-head-floating .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .tile-body {
   flex: 1;
   overflow: auto;

@@ -14,6 +14,13 @@ const COLS = 2;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 4;
 const FIT_PADDING = 24;
+// Floating head (Figma frame-label) sits above the focused tile in screen
+// space, so it stays readable at every zoom. Height is fixed in CSS — we
+// reuse the value here for vertical positioning.
+const FLOATING_HEAD_H = 32;
+const FLOATING_HEAD_GAP = 6;
+const FLOATING_HEAD_MIN_W = 240;
+const FLOATING_HEAD_MIN_TOP = 8;
 
 export function Canvas(props: {
   manifest: Manifest;
@@ -22,6 +29,20 @@ export function Canvas(props: {
   onExpandedChange: (id: string | null) => void;
 }) {
   const { artifacts, expandedId, onExpandedChange } = props;
+  // Figma-style focus: an unfocused tile is a non-interactive preview. A
+  // focused tile drops the body's pointer-events: none guard and surfaces a
+  // floating head (positioned in screen space, see below) so the controls
+  // stay readable at any zoom. Click outside or Esc to exit.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  // Per-tile revision selection. Lifted from TileWrapper so the floating
+  // head and the in-tile head (used in fullscreen) read/write the same map.
+  const [revisionOverrides, setRevisionOverrides] = useState<
+    Record<string, string>
+  >({});
+  const showIdFor = (id: string) => revisionOverrides[id] ?? id;
+  const setShowIdFor = (id: string, next: string) =>
+    setRevisionOverrides((prev) => ({ ...prev, [id]: next }));
+
   const tiles = artifacts.map(([id, rec], i) => {
     const col = i % COLS;
     const row = Math.floor(i / COLS);
@@ -41,6 +62,18 @@ export function Canvas(props: {
   // Cmd+= / Cmd+- / Cmd+0 (wired below) or the on-canvas toolbar instead.
   const wrapRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
+  const floatingHeadRef = useRef<HTMLDivElement>(null);
+  // Latest pan+scale, mirrored as a ref so the rzpp callback can position
+  // the floating head without triggering a React re-render every frame.
+  const transformStateRef = useRef<{
+    positionX: number;
+    positionY: number;
+    scale: number;
+  }>({ positionX: 0, positionY: 0, scale: 1 });
+  // Focused tile's canvas-space rect, kept in a ref for the same reason.
+  const focusedRectRef = useRef<{ x: number; y: number; w: number } | null>(
+    null,
+  );
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -91,9 +124,16 @@ export function Canvas(props: {
   // zoom path on iPad where trackpad pinch is eaten by the OS.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && expandedId) {
-        onExpandedChange(null);
-        return;
+      if (e.key === "Escape") {
+        // Esc walks the modal stack outside-in: fullscreen first, then focus.
+        if (expandedId) {
+          onExpandedChange(null);
+          return;
+        }
+        if (focusedId) {
+          setFocusedId(null);
+          return;
+        }
       }
       if (!(e.metaKey || e.ctrlKey)) return;
       const r = transformRef.current;
@@ -112,27 +152,124 @@ export function Canvas(props: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedId, onExpandedChange]);
+  }, [expandedId, onExpandedChange, focusedId]);
+
+  // Outside-click defocus. Capture phase so we hear the pointerdown before
+  // it bubbles up (and before react-zoom-pan-pinch's window mousedown). The
+  // floating head lives outside the tile's DOM subtree, so we accept clicks
+  // on either the focused tile OR its floating head as "still focused".
+  useEffect(() => {
+    if (!focusedId) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      const inTile = t.closest(`[data-tile-id="${CSS.escape(focusedId)}"]`);
+      const inHead = t.closest(
+        `[data-floating-head-for="${CSS.escape(focusedId)}"]`,
+      );
+      if (!inTile && !inHead) setFocusedId(null);
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  }, [focusedId]);
+
+  // Expanding a tile supersedes preview-focus: drop it so we don't return
+  // from fullscreen into a half-state.
+  useEffect(() => {
+    if (expandedId && focusedId) setFocusedId(null);
+  }, [expandedId, focusedId]);
 
   // Resolve the expanded record from the manifest so the overlay survives a
   // revision switch made from inside the canvas tile.
-  const expandedRec = expandedId ? props.manifest.artifacts[expandedId] : undefined;
+  const expandedShowId = expandedId ? showIdFor(expandedId) : null;
+  const expandedRec = expandedShowId
+    ? props.manifest.artifacts[expandedShowId]
+    : undefined;
+  const expandedOriginalRec = expandedId
+    ? props.manifest.artifacts[expandedId]
+    : undefined;
+
+  // ── Floating head positioning ──────────────────────────────────────────
+  // The head sits in screen space (anchored to .canvas-wrap, NOT inside
+  // TransformComponent), so it doesn't scale with the canvas. We update its
+  // left/top/width imperatively from the rzpp transform callback to avoid a
+  // React re-render every frame during pan.
+  const positionFloatingHead = () => {
+    const head = floatingHeadRef.current;
+    const rect = focusedRectRef.current;
+    if (!head || !rect) return;
+    const { positionX, positionY, scale } = transformStateRef.current;
+    const screenX = positionX + rect.x * scale;
+    const screenY = positionY + rect.y * scale;
+    const screenW = rect.w * scale;
+    const top = Math.max(
+      FLOATING_HEAD_MIN_TOP,
+      screenY - FLOATING_HEAD_H - FLOATING_HEAD_GAP,
+    );
+    head.style.left = `${screenX}px`;
+    head.style.top = `${top}px`;
+    head.style.width = `${Math.max(FLOATING_HEAD_MIN_W, screenW)}px`;
+  };
 
   // Hybrid grid: dots drawn on the un-transformed canvas-wrap, but their
   // size/offset is driven by the current pan+scale so they appear to glide
   // with the canvas (Figma feel) without re-rendering DOM during pan.
-  const updateGrid = (state: { scale: number; positionX: number; positionY: number }) => {
+  const updateGrid = (state: {
+    scale: number;
+    positionX: number;
+    positionY: number;
+  }) => {
+    transformStateRef.current = {
+      positionX: state.positionX,
+      positionY: state.positionY,
+      scale: state.scale,
+    };
     const wrap = wrapRef.current;
-    if (!wrap) return;
-    const gs = 24 * state.scale;
-    // Modulo into [0, gs) so background-position values stay small and
-    // the pattern wraps continuously instead of drifting forever.
-    const ox = ((state.positionX % gs) + gs) % gs;
-    const oy = ((state.positionY % gs) + gs) % gs;
-    wrap.style.setProperty("--grid-size", `${gs}px`);
-    wrap.style.setProperty("--grid-bg-x", `${ox}px`);
-    wrap.style.setProperty("--grid-bg-y", `${oy}px`);
+    if (wrap) {
+      const gs = 24 * state.scale;
+      // Modulo into [0, gs) so background-position values stay small and
+      // the pattern wraps continuously instead of drifting forever.
+      const ox = ((state.positionX % gs) + gs) % gs;
+      const oy = ((state.positionY % gs) + gs) % gs;
+      wrap.style.setProperty("--grid-size", `${gs}px`);
+      wrap.style.setProperty("--grid-bg-x", `${ox}px`);
+      wrap.style.setProperty("--grid-bg-y", `${oy}px`);
+    }
+    positionFloatingHead();
   };
+
+  // Re-anchor the floating head whenever the focused tile changes (or the
+  // layout that drives its rect changes). The transform itself is already
+  // current in the ref — just apply it to the new rect.
+  const focusedTile = focusedId ? tiles.find((t) => t.id === focusedId) : null;
+  useEffect(() => {
+    focusedRectRef.current = focusedTile
+      ? { x: focusedTile.x, y: focusedTile.y, w: TILE_W }
+      : null;
+    // Defer to next frame so the head element exists in the DOM when we
+    // size it (it's conditionally rendered).
+    const id = requestAnimationFrame(() => positionFloatingHead());
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedId, focusedTile?.x, focusedTile?.y]);
+
+  // Resolve focused-tile state for the floating head's controls.
+  const focusedShowId = focusedId ? showIdFor(focusedId) : null;
+  const focusedShowRec = focusedShowId
+    ? props.manifest.artifacts[focusedShowId]
+    : undefined;
+  const focusedOriginalRec = focusedId
+    ? props.manifest.artifacts[focusedId]
+    : undefined;
+  const focusedRevisions = focusedOriginalRec
+    ? Object.entries(props.manifest.artifacts)
+        .filter(
+          ([, a]) =>
+            a.projectId === focusedOriginalRec.projectId &&
+            a.name === focusedOriginalRec.name,
+        )
+        .sort((a, b) => b[1].revision - a[1].revision)
+    : [];
 
   if (artifacts.length === 0) {
     return (
@@ -170,7 +307,11 @@ export function Canvas(props: {
               contentStyle={{ width: canvasW, height: canvasH }}
             >
               <div
-                style={{ position: "relative", width: canvasW, height: canvasH }}
+                style={{
+                  position: "relative",
+                  width: canvasW,
+                  height: canvasH,
+                }}
               >
                 {tiles.map(({ id, rec, x, y }) => (
                   <TileWrapper
@@ -182,7 +323,11 @@ export function Canvas(props: {
                     y={y}
                     w={TILE_W}
                     h={TILE_H}
+                    focused={focusedId === id}
+                    onFocus={() => setFocusedId(id)}
                     onExpand={() => onExpandedChange(id)}
+                    showId={showIdFor(id)}
+                    onShowIdChange={(next) => setShowIdFor(id, next)}
                   />
                 ))}
               </div>
@@ -190,14 +335,53 @@ export function Canvas(props: {
           </>
         )}
       </TransformWrapper>
-      {expandedId && expandedRec && (
+      {focusedId && focusedShowRec && (
+        <div
+          ref={floatingHeadRef}
+          data-floating-head-for={focusedId}
+          className="tile-head tile-head-floating"
+        >
+          <span className="name">{focusedShowRec.name}</span>
+          <span className="rev">
+            <select
+              value={focusedShowId ?? focusedId}
+              onChange={(e) => setShowIdFor(focusedId, e.target.value)}
+            >
+              {focusedRevisions.map(([id, r]) => (
+                <option key={id} value={id}>
+                  v{r.revision}
+                </option>
+              ))}
+            </select>
+          </span>
+          <button
+            className="icon-btn"
+            onClick={() => onExpandedChange(focusedId)}
+            aria-label="fullscreen"
+            title="fullscreen"
+          >
+            ⤢
+          </button>
+          <button
+            className="icon-btn"
+            onClick={() => setFocusedId(null)}
+            aria-label="exit focus"
+            title="exit focus (esc)"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      {expandedId && expandedRec && expandedOriginalRec && (
         <TileWrapper
           key={"expanded-" + expandedId}
           artifactId={expandedId}
-          record={expandedRec}
+          record={expandedOriginalRec}
           manifest={props.manifest}
           expanded
           onClose={() => onExpandedChange(null)}
+          showId={expandedShowId ?? expandedId}
+          onShowIdChange={(next) => setShowIdFor(expandedId, next)}
         />
       )}
     </div>
@@ -208,15 +392,35 @@ type TileWrapperProps = {
   artifactId: string;
   record: ArtifactRecord;
   manifest: Manifest;
+  showId: string;
+  onShowIdChange: (next: string) => void;
 } & (
-  | { expanded?: false; x: number; y: number; w: number; h: number; onExpand: () => void; onClose?: never }
-  | { expanded: true; onClose: () => void; onExpand?: never; x?: never; y?: never; w?: never; h?: never }
+  | {
+      expanded?: false;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      onExpand: () => void;
+      focused?: boolean;
+      onFocus?: () => void;
+      onClose?: never;
+    }
+  | {
+      expanded: true;
+      onClose: () => void;
+      onExpand?: never;
+      focused?: never;
+      onFocus?: never;
+      x?: never;
+      y?: never;
+      w?: never;
+      h?: never;
+    }
 );
 
 function TileWrapper(props: TileWrapperProps) {
-  const [overrideId, setOverrideId] = useState<string | null>(null);
-  const showId = overrideId ?? props.artifactId;
-  const showRec = props.manifest.artifacts[showId] ?? props.record;
+  const showRec = props.manifest.artifacts[props.showId] ?? props.record;
 
   // Discover all revisions of this name in this project for the dropdown.
   const revisions = Object.entries(props.manifest.artifacts)
@@ -230,46 +434,72 @@ function TileWrapper(props: TileWrapperProps) {
     ? undefined
     : { left: props.x, top: props.y, width: props.w, height: props.h };
 
+  // Preview = canvas tile that isn't focused. We hide the chrome and make the
+  // body non-interactive (see CSS — pointer-events: none on .tile-body causes
+  // hit-testing to skip the iframe entirely, which is the only reliable way
+  // to keep iOS Safari from routing touches into the artifact). Focused tiles
+  // get their head bar via the floating head in Canvas — at that point the
+  // in-tile head is intentionally suppressed so we don't double-render and
+  // so the head stays readable when zoomed out.
+  const isPreview = !props.expanded && !props.focused;
+  const showInTileHead = !!props.expanded;
+
   return (
     <div
-      className={"tile" + (props.expanded ? " tile-expanded" : "")}
+      data-tile-id={props.artifactId}
+      className={
+        "tile" +
+        (props.expanded ? " tile-expanded" : "") +
+        (props.focused ? " tile-focused" : "") +
+        (isPreview ? " tile-preview" : "")
+      }
       style={tileStyle}
     >
-      <div className="tile-head">
-        <span className="name">{showRec.name}</span>
-        <span className="rev">
-          <select
-            value={showId}
-            onChange={(e) => setOverrideId(e.target.value)}
-          >
-            {revisions.map(([id, r]) => (
-              <option key={id} value={id}>
-                v{r.revision}
-              </option>
-            ))}
-          </select>
-        </span>
-        {props.expanded ? (
-          <button
-            className="icon-btn"
-            onClick={props.onClose}
-            aria-label="exit fullscreen"
-            title="exit fullscreen (esc)"
-          >
-            ✕
-          </button>
-        ) : (
-          <button
-            className="icon-btn"
-            onClick={props.onExpand}
-            aria-label="fullscreen"
-            title="fullscreen"
-          >
-            ⤢
-          </button>
-        )}
+      {showInTileHead && (
+        <div className="tile-head">
+          <span className="name">{showRec.name}</span>
+          <span className="rev">
+            <select
+              value={props.showId}
+              onChange={(e) => props.onShowIdChange(e.target.value)}
+            >
+              {revisions.map(([id, r]) => (
+                <option key={id} value={id}>
+                  v{r.revision}
+                </option>
+              ))}
+            </select>
+          </span>
+          {props.expanded ? (
+            <button
+              className="icon-btn"
+              onClick={props.onClose}
+              aria-label="exit fullscreen"
+              title="exit fullscreen (esc)"
+            >
+              ✕
+            </button>
+          ) : null}
+        </div>
+      )}
+      <div
+        className="tile-body-wrap"
+        // In preview mode .tile-body has pointer-events: none, so the iframe
+        // (or markdown scroller) doesn't see touches. Hit-testing falls to
+        // this wrapper, where a clean tap promotes the tile to focused. We
+        // do NOT stopPropagation: pointerdown still bubbles to the canvas
+        // pan handler, so a real drag pans instead of focusing.
+        onClick={
+          isPreview
+            ? (e) => {
+                e.stopPropagation();
+                props.onFocus?.();
+              }
+            : undefined
+        }
+      >
+        <Tile artifactId={props.showId} type={showRec.type} />
       </div>
-      <Tile artifactId={showId} type={showRec.type} />
     </div>
   );
 }
