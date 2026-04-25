@@ -15,8 +15,10 @@ const COLS = 2;
 export function Canvas(props: {
   manifest: Manifest;
   artifacts: Array<[string, ArtifactRecord]>;
+  expandedId: string | null;
+  onExpandedChange: (id: string | null) => void;
 }) {
-  const { artifacts } = props;
+  const { artifacts, expandedId, onExpandedChange } = props;
   const tiles = artifacts.map(([id, rec], i) => {
     const col = i % COLS;
     const row = Math.floor(i / COLS);
@@ -53,11 +55,10 @@ export function Canvas(props: {
 
   // Cmd/Ctrl + (= or +) / - / 0 → zoom in / out / reset. Provides a reliable
   // zoom path on iPad where trackpad pinch is eaten by the OS.
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && expandedId) {
-        setExpandedId(null);
+        onExpandedChange(null);
         return;
       }
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -76,7 +77,7 @@ export function Canvas(props: {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [expandedId]);
+  }, [expandedId, onExpandedChange]);
 
   // Resolve the expanded record from the manifest so the overlay survives a
   // revision switch made from inside the canvas tile.
@@ -116,7 +117,6 @@ export function Canvas(props: {
               contentStyle={{ width: canvasW, height: canvasH }}
             >
               <div
-                className="canvas-grid"
                 style={{ position: "relative", width: canvasW, height: canvasH }}
               >
                 {tiles.map(({ id, rec, x, y }) => (
@@ -129,7 +129,7 @@ export function Canvas(props: {
                     y={y}
                     w={TILE_W}
                     h={TILE_H}
-                    onExpand={() => setExpandedId(id)}
+                    onExpand={() => onExpandedChange(id)}
                   />
                 ))}
               </div>
@@ -144,7 +144,7 @@ export function Canvas(props: {
           record={expandedRec}
           manifest={props.manifest}
           expanded
-          onClose={() => setExpandedId(null)}
+          onClose={() => onExpandedChange(null)}
         />
       )}
     </div>

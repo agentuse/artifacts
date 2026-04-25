@@ -10,6 +10,7 @@ interface Route {
   runId?: string;
   artifactName?: string;
   revision?: number;
+  expandedId?: string;
 }
 
 function parseRoute(pathname: string): Route {
@@ -22,6 +23,7 @@ function parseRoute(pathname: string): Route {
     if (part === "r" && next) route.runId = decodeURIComponent(next);
     if (part === "a" && next) route.artifactName = decodeURIComponent(next);
     if (part === "v" && next) route.revision = parseInt(next, 10);
+    if (part === "f" && next) route.expandedId = decodeURIComponent(next);
   }
   return route;
 }
@@ -29,11 +31,13 @@ function parseRoute(pathname: string): Route {
 function pushRoute(r: Route): void {
   const parts: string[] = [];
   if (r.projectId) parts.push("p", encodeURIComponent(r.projectId));
-  if (r.runId) parts.push("r", encodeURIComponent(r.runId));
-  else if (r.artifactName) {
+  if (r.runId) {
+    parts.push("r", encodeURIComponent(r.runId));
+  } else if (r.artifactName) {
     parts.push("a", encodeURIComponent(r.artifactName));
     if (r.revision != null) parts.push("v", String(r.revision));
   }
+  if (r.expandedId) parts.push("f", encodeURIComponent(r.expandedId));
   const path = "/" + parts.join("/");
   if (path !== window.location.pathname) {
     window.history.pushState({}, "", path);
@@ -136,6 +140,12 @@ export function App() {
     setDrawerOpen(false);
   };
 
+  const onExpandedChange = (id: string | null) => {
+    const next: Route = { ...route, expandedId: id ?? undefined };
+    setRoute(next);
+    pushRoute(next);
+  };
+
   if (!manifest) {
     return <div className="empty">Loading…</div>;
   }
@@ -166,6 +176,8 @@ export function App() {
       <Canvas
         manifest={manifest}
         artifacts={selectedArtifacts}
+        expandedId={route.expandedId ?? null}
+        onExpandedChange={onExpandedChange}
       />
     </div>
   );

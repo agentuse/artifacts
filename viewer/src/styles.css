@@ -90,9 +90,10 @@ html, body, #root {
   color: var(--muted);
   font-size: 14px;
 }
-/* Figma-style dotted grid. Sits on the inner canvas content, so it scales
-   and pans with the zoom transform (the dots feel anchored to the canvas). */
-.canvas-grid {
+/* Dotted grid pinned to the viewport (the .canvas-wrap is the un-transformed
+   container). Tiles glide over a static dot field — clearer focus than a
+   grid that scales with zoom. */
+.canvas-wrap {
   background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
   background-size: 24px 24px;
   background-position: 0 0;
