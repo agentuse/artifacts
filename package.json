@@ -1,0 +1,36 @@
+{
+  "name": "@agentuse/artifacts",
+  "version": "0.1.0",
+  "description": "CLI + viewer for collecting artifacts emitted by AI agents",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "artifacts": "dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "viewer-dist"
+  ],
+  "scripts": {
+    "build": "npm run build:viewer && npm run build:cli",
+    "build:cli": "tsc -p tsconfig.json",
+    "build:viewer": "cd viewer && npm install --silent && npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx src/bin.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "node-html-parser": "^6.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

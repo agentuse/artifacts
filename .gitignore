@@ -1,0 +1,8 @@
+node_modules
+dist
+viewer-dist
+viewer/dist
+viewer/node_modules
+*.tsbuildinfo
+.DS_Store
+tmp
