@@ -9,8 +9,9 @@ import { Tile } from "./Tile";
 
 const TILE_W = 720;
 const TILE_H = 720;
-const GAP = 32;
-const COLS = 2;
+const GAP = 64;
+const MIN_COLS = 1;
+const MAX_COLS = 6;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 4;
 const FIT_PADDING = 24;
@@ -95,6 +96,14 @@ export function Canvas(props: {
   const [sizeOverrides, setSizeOverrides] = useState<SizeMap>(() =>
     loadStoredSizes(),
   );
+  // Track the canvas wrapper's clientWidth so the column count can flex
+  // with the visible viewport. Without this the layout was hardcoded to
+  // 2 columns and left big empty gutters on wide screens. Initialize from
+  // window.innerWidth as a usable pre-mount guess; the ResizeObserver
+  // below corrects it once the wrapper is laid out.
+  const [wrapWidth, setWrapWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1600,
+  );
   // Default to the latest revision of the same (project, name) so the
   // fullscreen overlay and floating head hot-reload when a new revision
   // arrives. Without this, expandedId is frozen at the moment the user hit
@@ -111,11 +120,15 @@ export function Canvas(props: {
   const setShowIdFor = (id: string, next: string) =>
     setRevisionOverrides((prev) => ({ ...prev, [id]: next }));
 
-  // Row-flow layout. Baseline row width = the original 2-column grid; tiles
-  // get placed left-to-right and wrap when the next tile won't fit. Row
-  // height = max height of tiles in that row, so a taller (resized) tile
-  // pushes the next row down without overlapping. A tile wider than the
+  // Row-flow layout. Column count flexes with the wrapper width so wide
+  // viewports actually use the available horizontal space (instead of a
+  // fixed 2-col grid that left a big right-side gap). Tiles get placed
+  // left-to-right and wrap when the next tile won't fit. Row height =
+  // max height of tiles in that row, so a taller (resized) tile pushes
+  // the next row down without overlapping. A tile wider than the
   // baseline takes the row to itself and stretches the canvas.
+  const fittingCols = Math.floor((wrapWidth - GAP) / (TILE_W + GAP));
+  const COLS = Math.max(MIN_COLS, Math.min(MAX_COLS, fittingCols));
   const baselineRowWidth = COLS * TILE_W + (COLS + 1) * GAP;
   type LaidOut = {
     id: string;
@@ -195,6 +208,24 @@ export function Canvas(props: {
       el.removeEventListener("gesturechange", stop, opts);
       el.removeEventListener("gestureend", stop, opts);
     };
+  }, []);
+
+  // Track wrapper width for responsive column count. Sync once on mount
+  // (replaces the window.innerWidth seed with the real laid-out width)
+  // and again whenever the wrapper resizes — opening/closing the sidebar
+  // drawer, splitting the window, etc.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    setWrapWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const w = entry.contentRect.width;
+        if (w > 0) setWrapWidth(w);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   // Compute the transform that fits the entire content rect into the viewport
@@ -589,9 +620,19 @@ function TileWrapper(props: TileWrapperProps) {
     )
     .sort((a, b) => b[1].revision - a[1].revision);
 
+  // Position via transform: translate(...) instead of left/top so that
+  // layout reflows can be animated cheaply via a CSS transition on
+  // `transform` (see styles.css). left/top transitions trigger layout on
+  // each frame; transforms stay on the compositor. Width and height are
+  // intentionally NOT transitioned — during a resize drag we want the
+  // focused tile to track the cursor 1:1, not lag behind a tween.
   const tileStyle = props.expanded
     ? undefined
-    : { left: props.x, top: props.y, width: props.w, height: props.h };
+    : {
+        transform: `translate(${props.x}px, ${props.y}px)`,
+        width: props.w,
+        height: props.h,
+      };
 
   // Preview = canvas tile that isn't focused. We hide the chrome and make the
   // body non-interactive (see CSS — pointer-events: none on .tile-body causes

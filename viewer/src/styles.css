@@ -101,6 +101,14 @@ html, body, #root {
 }
 .tile {
   position: absolute;
+  /* Origin stays at (0, 0); per-tile position comes from
+     `transform: translate(x, y)` set inline in Canvas. Transitioning
+     `transform` (instead of left/top) keeps reflow on the compositor and
+     avoids layout thrash when many tiles slide at once (e.g. when the
+     focused tile is resized and pushes its row, or when the wrapper
+     resizes and the column count flexes). */
+  left: 0;
+  top: 0;
   background: var(--tile-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -108,8 +116,11 @@ html, body, #root {
   box-shadow: 0 4px 16px rgba(0,0,0,0.05);
   display: flex;
   flex-direction: column;
+  transition: transform 240ms cubic-bezier(0.22, 0.8, 0.24, 1);
+  will-change: transform;
 }
-/* Fullscreen overlay: pinned to the viewport, not affected by zoom-pan. */
+/* Fullscreen overlay: pinned to the viewport, not affected by zoom-pan
+   and not animated (it's a modal, not a layout reflow). */
 .tile.tile-expanded {
   position: fixed;
   inset: 0;
@@ -119,6 +130,11 @@ html, body, #root {
   border: none;
   box-shadow: none;
   z-index: 200;
+  transform: none;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: none; }
 }
 .icon-btn {
   background: transparent;
