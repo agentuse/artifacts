@@ -5,6 +5,24 @@ import rehypeHighlight from "rehype-highlight";
 import { fetchArtifact } from "../api";
 
 export function Tile(props: { artifactId: string; type: "markdown" | "html" }) {
+  if (props.type === "html") {
+    // The iframe loads /api/render/:id directly. The server attaches CSP
+    // there; sandbox="allow-scripts" (no allow-same-origin) keeps the iframe
+    // in an opaque origin so its scripts cannot reach the parent viewer.
+    return (
+      <div className="tile-body html">
+        <iframe
+          sandbox="allow-scripts"
+          src={`/api/render/${props.artifactId}`}
+          title="artifact"
+        />
+      </div>
+    );
+  }
+  return <MarkdownTile artifactId={props.artifactId} />;
+}
+
+function MarkdownTile(props: { artifactId: string }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,22 +42,8 @@ export function Tile(props: { artifactId: string; type: "markdown" | "html" }) {
     };
   }, [props.artifactId]);
 
-  if (error) {
-    return <div className="tile-body">error: {error}</div>;
-  }
-  if (content == null) {
-    return <div className="tile-body">loading…</div>;
-  }
-  if (props.type === "html") {
-    // Server has already injected meta-CSP and stripped meta-refresh / base /
-    // preload-rel <link>. We pile sandbox="" on top so even if scrubbing fails
-    // open, the iframe still cannot run scripts, navigate top, or read same-origin.
-    return (
-      <div className="tile-body html">
-        <iframe sandbox="" srcDoc={content} title="artifact" />
-      </div>
-    );
-  }
+  if (error) return <div className="tile-body">error: {error}</div>;
+  if (content == null) return <div className="tile-body">loading…</div>;
   return (
     <div className="tile-body">
       <div className="markdown">

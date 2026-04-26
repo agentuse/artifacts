@@ -72,7 +72,8 @@ A "run" is just a string the user supplies via `--run <tag>` or the `AGENTUSE_RU
 
 Two shapes of route:
 - `/api/manifest` -> raw manifest JSON.
-- `/api/artifact/:artifactId` -> markdown bytes as `text/markdown`, OR for HTML artifacts, the **sanitized srcdoc** as `text/plain` (so the browser cannot interpret it at this origin; the SPA assigns it to `<iframe srcdoc sandbox="">`).
+- `/api/artifact/:artifactId` -> markdown bytes as `text/markdown`. HTML artifacts are rejected here (400); use `/api/render/:id`.
+- `/api/render/:artifactId` -> sanitized HTML as `text/html` with its own `Content-Security-Policy` and `X-Frame-Options: SAMEORIGIN` response headers. The SPA loads this via `<iframe src="/api/render/:id" sandbox="allow-scripts">`. Going through `src=` (not `srcdoc`) is what lets the artifact have its own CSP — srcdoc inherits the parent SPA CSP, `src=` does not.
 - Everything else falls back to `viewer-dist/index.html` for SPA routes (`/p/:projectId`, `/p/:projectId/r/:runId`, `/p/:projectId/a/:name/v/:rev`, etc.).
 
 Server lifecycle:
@@ -84,12 +85,16 @@ Server lifecycle:
 
 `src/sanitize.ts` is the trust boundary for ingested HTML artifacts. It runs at **serve time**, not ingest time, so changes to the sanitizer take effect for already-stored artifacts. Two layers:
 
-1. `scrubHtml()` parses with `node-html-parser` (no regex on tags) and removes: `<base>`, `<meta http-equiv="refresh">`, `<link rel>` with `preload|prefetch|dns-prefetch|preconnect|modulepreload`. These survive a no-script CSP.
-2. `buildSafeSrcdoc()` injects a `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:">` as the first child of `<head>` (creating one if missing). The parent SPA's CSP header does NOT propagate into iframe srcdoc, so the meta tag is the only enforcement inside the artifact.
+1. `scrubHtml()` parses with `node-html-parser` (no regex on tags) and removes: `<base>`, `<meta http-equiv="refresh">`, `<link rel>` with `preload|prefetch|dns-prefetch|preconnect|modulepreload`.
+2. `buildSafeSrcdoc()` injects `META_CSP` as a `<meta http-equiv="Content-Security-Policy">` as the first child of `<head>` (creating one if missing). The same policy is also sent as a response header from `/api/render/:id` — the meta tag is defense in depth (survives if the file is saved or opened directly).
 
-The SPA-level CSP (`SPA_CSP` in `server.ts`) must stay at least as permissive as the meta-CSP for any directive that the artifact relies on (style, img, font), because when both apply the strictest wins. `script-src 'self'` is intentionally narrower; the meta-CSP's `default-src 'none'` blocks artifact scripts regardless.
+**Threat model:** the agent producing artifacts is developer-controlled, but its inputs (web pages, PRs, docs) aren't. The realistic risk is prompt-injection routing through the agent into artifact markup. So `META_CSP` permits external `https:` for script/style/font/img (designs use Tailwind Play CDN, Google Fonts) but locks `connect-src 'none'` to deny `fetch`/`XHR`/`WebSocket` — kills exfil + LAN scan. `frame-src 'none'`, `object-src 'none'`, `base-uri 'none'` close the rest.
 
-When modifying sanitization: do not switch to regex; do not relax the meta-CSP without considering both the parent CSP and the iframe `sandbox=""` attribute together.
+**Origin isolation comes from the iframe, not the CSP.** `viewer/src/components/Tile.tsx` sets `sandbox="allow-scripts"` *without* `allow-same-origin`, so the iframe lives in an opaque origin. Scripts in the artifact cannot read the parent viewer DOM, localStorage, or cookies regardless of what the CSP allows. Do not add `allow-same-origin` to the sandbox attribute — it would defeat the isolation and the threat model assumes scripts run.
+
+`SPA_CSP` (the viewer SPA's own CSP) is independent because the artifact is loaded via `src=`, not `srcdoc`. No inheritance. Keep `SPA_CSP` tight.
+
+When modifying sanitization: do not switch to regex; do not relax `connect-src` (that's the lever holding back exfil); do not add `allow-same-origin` to the iframe sandbox.
 
 ### CLI conventions
 
@@ -101,7 +106,7 @@ When modifying sanitization: do not switch to regex; do not relax the meta-CSP w
 
 - React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `navRoute` over `window.location` in `App.tsx`. Path shape: `/p/:projectId[/r/:runId | /a/:name[/v/:rev]][/f/:expandedId]?d=1`.
 - Manifest is polled every 2s from `/api/manifest`. There is no websocket or SSE.
-- HTML artifacts render via `<iframe srcdoc sandbox="">` fed by `/api/artifact/:id`. Markdown uses `react-markdown` + `remark-gfm` + `rehype-highlight`.
+- HTML artifacts render via `<iframe src="/api/render/:id" sandbox="allow-scripts">`. Markdown is fetched from `/api/artifact/:id` and rendered with `react-markdown` + `remark-gfm` + `rehype-highlight`.
 - `react-zoom-pan-pinch` powers the canvas pan/zoom. If you touch gestures here, mind the conflict between iframe scrolling and the parent pan handler.
 
 ## Conventions specific to this repo

@@ -1,7 +1,28 @@
 import { parse, HTMLElement, Node, NodeType } from "node-html-parser";
 
+// CSP applied to the iframe document that renders an HTML artifact.
+//
+// Threat model: the agent that wrote the artifact is the developer's own, but
+// its inputs (web pages, PRs, docs the agent reads) are not. The realistic
+// risk is prompt-injection routing through the agent into artifact markup.
+//
+// The iframe is loaded with sandbox="allow-scripts" (no allow-same-origin), so
+// scripts run in an opaque origin and cannot reach the parent viewer DOM,
+// localStorage, or cookies. What scripts CAN still do without further limits
+// is fetch arbitrary URLs (data exfil + localhost/LAN scan). We block that
+// with connect-src 'none'. External https for script/style/font/img is
+// allowed so designs that pull from CDNs (Tailwind Play, Google Fonts) and
+// inline their config render correctly.
 export const META_CSP =
-  "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:";
+  "default-src 'none'; " +
+  "script-src 'unsafe-inline' 'unsafe-eval' https:; " +
+  "style-src 'unsafe-inline' https:; " +
+  "font-src https: data:; " +
+  "img-src https: data: blob:; " +
+  "connect-src 'none'; " +
+  "frame-src 'none'; " +
+  "object-src 'none'; " +
+  "base-uri 'none'";
 
 const PRELOAD_REL = new Set(["preload", "prefetch", "dns-prefetch", "preconnect", "modulepreload"]);
 
@@ -53,12 +74,12 @@ function shouldRemove(tag: string, el: HTMLElement): boolean {
 }
 
 /**
- * Wrap arbitrary HTML for safe rendering inside an iframe srcdoc.
+ * Wrap arbitrary HTML for safe rendering inside an iframe.
  *
- *  1. Inject a <meta http-equiv="Content-Security-Policy"> with default-src 'none'.
- *     The parent SPA's CSP header does NOT propagate into iframe srcdoc, so we put
- *     it in the document itself.
- *  2. Pre-injection scrub: strip meta-refresh, base, and preload-family <link>.
+ *  1. Scrub: strip meta-refresh, <base>, and preload-family <link>.
+ *  2. Inject a <meta http-equiv="Content-Security-Policy">. The server also
+ *     sends the same policy as a response header — the meta tag is defense
+ *     in depth (it survives if the file is saved, opened directly, etc.).
  */
 export function buildSafeSrcdoc(input: string): string {
   const scrubbed = scrubHtml(input);

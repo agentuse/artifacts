@@ -24,10 +24,10 @@ describe("scrubHtml", () => {
     }
   });
 
-  it("preserves benign <link rel=stylesheet> attribute (CSP blocks the network)", () => {
-    // Stylesheet links are not stripped; the meta-CSP style-src 'unsafe-inline'
-    // (no remote origin) prevents the actual fetch. We do not strip because
-    // some authors include them legitimately for offline screenshots.
+  it("preserves benign <link rel=stylesheet> attribute", () => {
+    // Stylesheet links are not stripped; the meta-CSP allows style-src https:
+    // so external CSS will load (designs commonly use Google Fonts, Tailwind
+    // Play, etc.). connect-src 'none' still prevents JS exfil.
     const out = scrubHtml(`<link rel="stylesheet" href="x.css">`);
     expect(out).toContain("<link");
   });
@@ -62,7 +62,26 @@ describe("buildSafeSrcdoc", () => {
     );
     expect(out.toLowerCase()).not.toContain("refresh");
     expect(out).toContain(META_CSP);
-    // Image stays in DOM; CSP img-src data: blocks the network.
+    // Image stays in DOM; CSP img-src https: data: allows it to load.
     expect(out).toContain("attacker.test");
+  });
+});
+
+describe("META_CSP", () => {
+  it("blocks fetch/XHR/WebSocket via connect-src 'none'", () => {
+    expect(META_CSP).toContain("connect-src 'none'");
+  });
+
+  it("permits external https for script/style/font/img so CDN designs render", () => {
+    expect(META_CSP).toMatch(/script-src[^;]*\bhttps:/);
+    expect(META_CSP).toMatch(/style-src[^;]*\bhttps:/);
+    expect(META_CSP).toMatch(/font-src[^;]*\bhttps:/);
+    expect(META_CSP).toMatch(/img-src[^;]*\bhttps:/);
+  });
+
+  it("denies framing children and plugin objects", () => {
+    expect(META_CSP).toContain("frame-src 'none'");
+    expect(META_CSP).toContain("object-src 'none'");
+    expect(META_CSP).toContain("base-uri 'none'");
   });
 });

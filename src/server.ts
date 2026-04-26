@@ -7,7 +7,7 @@ import { CliError } from "./errors.js";
 import { rootDir, servePidPath, artifactFilePath } from "./paths.js";
 import { readManifest } from "./manifest.js";
 import { extFromType } from "./validation.js";
-import { buildSafeSrcdoc } from "./sanitize.js";
+import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 
 export const DEFAULT_PORT = 7878;
 const HOST = "127.0.0.1";
@@ -60,13 +60,10 @@ const MIME: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-// Browsers inherit the parent SPA's CSP into iframe srcdoc documents (same
-// origin). When two CSPs apply, the strictest wins, so the meta-CSP we inject
-// inside the srcdoc cannot be MORE permissive than this one for any directive.
-// Concretely: artifacts use inline <style> and style="" attributes, so the
-// parent must allow 'unsafe-inline' for style. We also widen img-src/font-src
-// to match the meta-CSP. script-src stays locked to 'self' — meta-CSP's
-// default-src 'none' ensures no script in the artifact runs anyway.
+// CSP for the viewer SPA itself. HTML artifacts are loaded via
+// <iframe src="/api/render/:id"> — that response carries its own CSP header
+// (META_CSP) and the parent SPA's CSP does NOT inherit into a src=-loaded
+// document, so this policy can stay tight without affecting artifact rendering.
 const SPA_CSP =
   "default-src 'self'; " +
   "script-src 'self'; " +
@@ -132,7 +129,8 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
     return;
   }
 
-  // /api/artifact/{artifactId}  -> raw content (markdown text or sanitized HTML srcdoc)
+  // /api/artifact/{artifactId}  -> raw markdown bytes. HTML is rejected here;
+  // see /api/render/:id below.
   const artMatch = /^\/api\/artifact\/([A-Za-z0-9_]+)$/.exec(pathname);
   if (artMatch) {
     const id = artMatch[1]!;
@@ -143,18 +141,47 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
         send(res, 404, "not found");
         return;
       }
+      if (rec.type === "html") {
+        send(res, 400, "use /api/render/:id for HTML artifacts");
+        return;
+      }
       const ext = extFromType(rec.type);
       const file = artifactFilePath(rec.projectId, id, ext);
       const buf = fs.readFileSync(file);
-      if (rec.type === "html") {
-        const safe = buildSafeSrcdoc(buf.toString("utf8"));
-        // We ship the *sanitized* srcdoc as text/plain so the browser cannot
-        // interpret it at this origin. The SPA reads it and assigns it to
-        // an iframe's srcdoc attribute with sandbox="".
-        send(res, 200, safe, { "content-type": "text/plain; charset=utf-8" });
-      } else {
-        send(res, 200, buf, { "content-type": "text/markdown; charset=utf-8" });
+      send(res, 200, buf, { "content-type": "text/markdown; charset=utf-8" });
+    } catch (e) {
+      send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  // /api/render/{artifactId}  -> sanitized HTML served as text/html with its
+  // own CSP header. Loaded via <iframe src=...> with sandbox="allow-scripts"
+  // (no allow-same-origin), so it lives in an opaque origin isolated from the
+  // viewer. Direct browser navigation here is rare; the CSP still applies
+  // (connect-src 'none') so even direct nav cannot phone home or scan LAN.
+  const renderMatch = /^\/api\/render\/([A-Za-z0-9_]+)$/.exec(pathname);
+  if (renderMatch) {
+    const id = renderMatch[1]!;
+    try {
+      const m = readManifest();
+      const rec = m.artifacts[id];
+      if (!rec) {
+        send(res, 404, "not found");
+        return;
       }
+      if (rec.type !== "html") {
+        send(res, 400, "not an html artifact");
+        return;
+      }
+      const file = artifactFilePath(rec.projectId, id, extFromType(rec.type));
+      const buf = fs.readFileSync(file);
+      const safe = buildSafeSrcdoc(buf.toString("utf8"));
+      send(res, 200, safe, {
+        "content-type": "text/html; charset=utf-8",
+        "content-security-policy": META_CSP,
+        "x-frame-options": "SAMEORIGIN",
+      });
     } catch (e) {
       send(res, 500, (e as Error).message);
     }
