@@ -1,3 +1,11 @@
+export type ArtifactType =
+  | "markdown"
+  | "html"
+  | "png"
+  | "jpg"
+  | "webp"
+  | "pdf";
+
 export interface ProjectRecord {
   name: string;
   path: string;
@@ -13,7 +21,7 @@ export interface ArtifactRecord {
   projectId: string;
   runId?: string;
   name: string;
-  type: "markdown" | "html";
+  type: ArtifactType;
   revision: number;
   previousArtifactId?: string;
   contentHash: string;

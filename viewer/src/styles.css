@@ -223,20 +223,160 @@ html, body, #root {
   display: block;
 }
 .tile-body.html { padding: 0; }
+.tile-body.pdf { padding: 0; }
+.tile-body.image {
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pane-bg);
+}
+.tile-body.image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.tile-body.markdown-body {
+  padding: 48px 32px 96px;
+}
 .tile-body .markdown {
-  font-size: 14px;
-  line-height: 1.55;
+  max-width: 720px;
+  margin: 0 auto;
+  font-family: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: "ss01", "cv11", "kern";
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--fg);
+  letter-spacing: -0.003em;
+  word-wrap: break-word;
+}
+.tile-body .markdown > :first-child { margin-top: 0; }
+.tile-body .markdown > :last-child { margin-bottom: 0; }
+.tile-body .markdown p {
+  margin: 0 0 1.1em;
+}
+.tile-body .markdown h1,
+.tile-body .markdown h2,
+.tile-body .markdown h3,
+.tile-body .markdown h4,
+.tile-body .markdown h5,
+.tile-body .markdown h6 {
+  font-family: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 1.8em 0 0.6em;
+  color: var(--fg);
+}
+.tile-body .markdown h1 {
+  font-size: 2.1em;
+  letter-spacing: -0.028em;
+  margin-top: 0.2em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.tile-body .markdown h2 {
+  font-size: 1.55em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+.tile-body .markdown h3 { font-size: 1.25em; }
+.tile-body .markdown h4 { font-size: 1.05em; }
+.tile-body .markdown h5 { font-size: 0.95em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.tile-body .markdown h6 { font-size: 0.9em; color: var(--muted); }
+.tile-body .markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.tile-body .markdown a:hover { text-decoration-thickness: 2px; }
+.tile-body .markdown strong { font-weight: 650; }
+.tile-body .markdown ul,
+.tile-body .markdown ol {
+  margin: 0 0 1.1em;
+  padding-left: 1.6em;
+}
+.tile-body .markdown li { margin: 0.25em 0; }
+.tile-body .markdown li > p { margin: 0.4em 0; }
+.tile-body .markdown li::marker { color: var(--muted); }
+.tile-body .markdown blockquote {
+  margin: 1.2em 0;
+  padding: 0.2em 1.1em;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+  font-style: italic;
+  background: rgba(127, 127, 127, 0.04);
+  border-radius: 0 6px 6px 0;
+}
+.tile-body .markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2.4em 0;
+}
+.tile-body .markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+  margin: 1.2em auto;
+}
+.tile-body .markdown code {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  background: rgba(127, 127, 127, 0.12);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
 }
 .tile-body .markdown pre {
   background: var(--pane-bg);
-  padding: 10px;
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  padding: 14px 16px;
+  border-radius: 8px;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 1.2em 0;
 }
-.tile-body .markdown code { font-size: 12px; }
-.tile-body .markdown table { border-collapse: collapse; font-size: 13px; }
-.tile-body .markdown th, .tile-body .markdown td { border: 1px solid var(--border); padding: 4px 8px; }
+.tile-body .markdown pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+.tile-body .markdown table {
+  border-collapse: collapse;
+  font-size: 14px;
+  margin: 1.2em 0;
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+.tile-body .markdown th,
+.tile-body .markdown td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+.tile-body .markdown th {
+  background: var(--pane-bg);
+  font-weight: 600;
+}
+.tile-body .markdown tr:nth-child(2n) td {
+  background: rgba(127, 127, 127, 0.03);
+}
+.tile-body .markdown kbd {
+  background: var(--pane-bg);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+}
 .toolbar {
   position: absolute;
   top: 12px;
