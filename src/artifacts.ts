@@ -14,10 +14,16 @@ import {
   writeManifestAtomic,
 } from "./manifest.js";
 import { sha256, shortId } from "./hash.js";
-import { extFromType, inferType, resolveLogicalName } from "./validation.js";
+import {
+  ArtifactType,
+  assertExtCompatible,
+  extFromType,
+  inferType,
+  resolveLogicalName,
+} from "./validation.js";
 import { ProjectInfo, resolveProject } from "./project.js";
 
-export const DEFAULT_MAX_SIZE = 5 * 1024 * 1024;
+export const DEFAULT_MAX_SIZE = 25 * 1024 * 1024;
 
 export interface AddInput {
   /** A filesystem path or "-" for stdin. */
@@ -36,7 +42,7 @@ export interface AddInput {
 export interface AddResult {
   artifactId: string;
   name: string;
-  type: "markdown" | "html";
+  type: ArtifactType;
   revision: number;
   previousRevision?: number;
   previousArtifactId?: string;
@@ -103,7 +109,7 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
   type Prepared = {
     input: AddInput;
     name: string;
-    type: "markdown" | "html";
+    type: ArtifactType;
     buf: Buffer;
     contentHash: string;
   };
@@ -111,6 +117,10 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
   for (const input of inputs) {
     const isStdin = input.source === "-";
     const resolvedSource = isStdin ? undefined : resolveSourceForName(input.source);
+    assertExtCompatible({
+      sourcePath: isStdin ? undefined : input.source,
+      explicitName: input.name,
+    });
     const name = resolveLogicalName({
       explicitName: input.name,
       resolvedSource,

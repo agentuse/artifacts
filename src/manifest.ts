@@ -23,7 +23,7 @@ export interface ArtifactRecord {
    *  artifact via `--run <tag>` or the `AGENTUSE_RUN_ID` env var. */
   runId?: string;
   name: string;
-  type: "markdown" | "html";
+  type: "markdown" | "html" | "png" | "jpg" | "webp" | "pdf";
   revision: number;
   previousArtifactId?: string;
   contentHash: string;

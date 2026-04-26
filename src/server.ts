@@ -58,6 +58,9 @@ const MIME: Record<string, string> = {
   ".png": "image/png",
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
 };
 
 // CSP for the viewer SPA itself. HTML artifacts are loaded via
@@ -80,16 +83,32 @@ function send(
   status: number,
   body: string | Buffer,
   headers: Record<string, string> = {},
+  opts: { csp?: string | null } = {},
 ): void {
-  res.writeHead(status, {
+  const merged: Record<string, string> = {
     "content-type": "text/plain; charset=utf-8",
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
-    "content-security-policy": SPA_CSP,
     ...headers,
-  });
+  };
+  // csp: undefined -> default SPA_CSP, string -> custom, null -> omit entirely
+  // (used for PDF responses so Firefox PDF.js isn't constrained by SPA_CSP).
+  if (opts.csp === undefined) merged["content-security-policy"] = SPA_CSP;
+  else if (opts.csp !== null) merged["content-security-policy"] = opts.csp;
+  res.writeHead(status, merged);
   res.end(body);
 }
+
+// Lockdown CSP for image responses. Images don't execute, but defense in depth:
+// kill everything but the image itself.
+const IMAGE_CSP = "default-src 'none'";
+
+const BINARY_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  webp: "image/webp",
+  pdf: "application/pdf",
+};
 
 function serveStatic(res: http.ServerResponse, dir: string, file: string): void {
   const ext = path.extname(file).toLowerCase();
@@ -129,8 +148,8 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
     return;
   }
 
-  // /api/artifact/{artifactId}  -> raw markdown bytes. HTML is rejected here;
-  // see /api/render/:id below.
+  // /api/artifact/{artifactId}  -> raw bytes for everything except HTML
+  // (HTML routes through /api/render/:id for sanitization).
   const artMatch = /^\/api\/artifact\/([A-Za-z0-9_]+)$/.exec(pathname);
   if (artMatch) {
     const id = artMatch[1]!;
@@ -148,7 +167,28 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
       const ext = extFromType(rec.type);
       const file = artifactFilePath(rec.projectId, id, ext);
       const buf = fs.readFileSync(file);
-      send(res, 200, buf, { "content-type": "text/markdown; charset=utf-8" });
+      if (rec.type === "markdown") {
+        send(res, 200, buf, { "content-type": "text/markdown; charset=utf-8" });
+        return;
+      }
+      const mime = BINARY_MIME[rec.type];
+      if (!mime) {
+        send(res, 500, `unhandled type: ${rec.type}`);
+        return;
+      }
+      // PDF: omit CSP so the browser's PDF viewer (Firefox PDF.js especially)
+      // can run unconstrained. Origin isolation comes from the iframe sandbox
+      // in the viewer, not from CSP. Image: lock down with default-src 'none'.
+      send(
+        res,
+        200,
+        buf,
+        {
+          "content-type": mime,
+          "content-disposition": "inline",
+        },
+        { csp: rec.type === "pdf" ? null : IMAGE_CSP },
+      );
     } catch (e) {
       send(res, 500, (e as Error).message);
     }
