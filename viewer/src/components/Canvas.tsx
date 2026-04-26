@@ -39,7 +39,19 @@ export function Canvas(props: {
   const [revisionOverrides, setRevisionOverrides] = useState<
     Record<string, string>
   >({});
-  const showIdFor = (id: string) => revisionOverrides[id] ?? id;
+  // Default to the latest revision of the same (project, name) so the
+  // fullscreen overlay and floating head hot-reload when a new revision
+  // arrives. Without this, expandedId is frozen at the moment the user hit
+  // expand — canvas tiles update because the latest map remounts them with
+  // a new id, but the overlay never sees that swap. An explicit dropdown
+  // pick wins, so manually pinning to v2 still sticks.
+  const showIdFor = (id: string) => {
+    const override = revisionOverrides[id];
+    if (override) return override;
+    const rec = props.manifest.artifacts[id];
+    if (!rec) return id;
+    return props.manifest.latest[rec.projectId]?.[rec.name] ?? id;
+  };
   const setShowIdFor = (id: string, next: string) =>
     setRevisionOverrides((prev) => ({ ...prev, [id]: next }));
 
