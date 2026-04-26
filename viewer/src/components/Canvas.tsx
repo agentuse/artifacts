@@ -65,10 +65,11 @@ function persistSizes(map: SizeMap): void {
 }
 // Floating head (Figma frame-label) sits above the focused tile in screen
 // space, so it stays readable at every zoom. Height is fixed in CSS — we
-// reuse the value here for vertical positioning.
-const FLOATING_HEAD_H = 32;
-const FLOATING_HEAD_GAP = 6;
-const FLOATING_HEAD_MIN_W = 240;
+// reuse the value here for vertical positioning. Sized to host 44×44
+// touch targets per Apple HIG (and Material's 48dp) plus padding.
+const FLOATING_HEAD_H = 56;
+const FLOATING_HEAD_GAP = 8;
+const FLOATING_HEAD_MIN_W = 320;
 const FLOATING_HEAD_MIN_TOP = 8;
 
 export function Canvas(props: {

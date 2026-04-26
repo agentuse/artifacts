@@ -136,37 +136,60 @@ html, body, #root {
 @media (prefers-reduced-motion: reduce) {
   .tile { transition: none; }
 }
+/* Icon button: sized to meet Apple HIG's 44×44 minimum touch target so
+   it is comfortably tappable on phones / iPad. The visible symbol is a
+   16px glyph centered inside that hit area, not the whole button. */
 .icon-btn {
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 2px 6px;
-  font-size: 12px;
+  border-radius: 8px;
+  padding: 0 10px;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   color: var(--muted);
-  margin-left: 6px;
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+.icon-btn:active { background: rgba(127,127,127,0.08); }
 .tile-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
+  gap: 10px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 14px;
   background: var(--pane-bg);
+  /* Min-height keeps the bar tall enough to host 44px touch targets even
+     when content shrinks to a single short name. */
+  min-height: 56px;
 }
-.tile-head .name { font-weight: 600; }
+.tile-head .name {
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tile-head .rev {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   color: var(--accent);
   background: rgba(194,65,12,0.08);
-  padding: 1px 6px;
-  border-radius: 3px;
+  padding: 0 10px;
+  border-radius: 6px;
   cursor: pointer;
   border: none;
-  font-size: 11px;
+  font-size: 13px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
 }
 .tile-head .rev select {
   background: transparent;
@@ -174,6 +197,10 @@ html, body, #root {
   color: var(--accent);
   font: inherit;
   cursor: pointer;
+  /* Native pickers on iOS need a minimum tappable height. The pill above
+     is 36px; the select fills it via the inline-flex layout. */
+  min-height: 36px;
+  padding: 0 4px;
 }
 .tile-body-wrap {
   position: relative;
@@ -202,31 +229,32 @@ html, body, #root {
 }
 /* Bottom-right corner grip for the focused tile. Sits above the body so it
    catches pointerdown before the body content does. The diagonal stripes
-   are a CSS gradient — no extra DOM. */
+   are a CSS gradient — no extra DOM. Sized for finger-tap (≈44px hit
+   area) per Apple HIG; the visible stripe pattern is scaled to match. */
 .tile-resize-handle {
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 18px;
-  height: 18px;
+  width: 44px;
+  height: 44px;
   cursor: nwse-resize;
   z-index: 5;
   background:
     linear-gradient(
       135deg,
       transparent 0,
-      transparent 6px,
-      var(--muted) 6px,
-      var(--muted) 7px,
-      transparent 7px,
-      transparent 10px,
-      var(--muted) 10px,
-      var(--muted) 11px,
-      transparent 11px,
-      transparent 14px,
-      var(--muted) 14px,
-      var(--muted) 15px,
-      transparent 15px
+      transparent 16px,
+      var(--muted) 16px,
+      var(--muted) 18px,
+      transparent 18px,
+      transparent 24px,
+      var(--muted) 24px,
+      var(--muted) 26px,
+      transparent 26px,
+      transparent 32px,
+      var(--muted) 32px,
+      var(--muted) 34px,
+      transparent 34px
     );
   opacity: 0.7;
   touch-action: none;
@@ -238,26 +266,20 @@ html, body, #root {
    positionFloatingHead). Keep height in sync with FLOATING_HEAD_H there. */
 .tile-head-floating {
   position: absolute;
-  height: 32px;
+  /* Height tracks FLOATING_HEAD_H in Canvas.tsx; both must change together
+     because the head is positioned imperatively (top = tileTop - height
+     - gap). Sized to host 44×44 touch targets per Apple HIG. */
+  height: 56px;
   z-index: 50;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--pane-bg);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
   /* Override .tile-head's bottom border (we share the class for styling
      of name/rev/icon-btn, but the floating variant is a free-standing pill,
      not the top edge of a tile). */
   border-bottom: 1px solid var(--border);
-  /* Truncate the name when the tile is narrow (zoomed out); the controls
-     on the right keep their natural size. */
   min-width: 0;
-}
-.tile-head-floating .name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1 1 auto;
 }
 .tile-body {
   flex: 1;
@@ -431,18 +453,25 @@ html, body, #root {
   right: 12px;
   z-index: 10;
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 .toolbar button {
   background: var(--tile-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
+  border-radius: 8px;
+  /* HIG-compliant 44×44 touch targets (zoom in/out/fit). */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 15px;
   cursor: pointer;
   color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+.toolbar button:active { background: var(--pane-bg); }
 
 /* ---- Narrow viewports (iPad portrait, split view, phones) ---- */
 @media (max-width: 900px) {
@@ -485,16 +514,22 @@ html, body, #root {
     min-height: 0;
   }
   .menu-btn {
-    display: block;
+    /* Pinned to a 48×48 hit area — HIG-comfortable on phones, large
+       enough to read at arm's length on iPad. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     position: fixed;
     top: 10px;
     left: 10px;
     z-index: 101;
     background: var(--tile-bg);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px 12px;
-    font-size: 18px;
+    border-radius: 10px;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 0;
+    font-size: 22px;
     line-height: 1;
     cursor: pointer;
     color: inherit;
