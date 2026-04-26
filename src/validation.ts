@@ -72,13 +72,62 @@ export function validateName(input: string): string {
   return normalized;
 }
 
-export function inferType(name: string): "markdown" | "html" {
+export type ArtifactType = "markdown" | "html" | "png" | "jpg" | "webp" | "pdf";
+
+const EXT_TO_TYPE: Record<string, ArtifactType> = {
+  ".md": "markdown",
+  ".markdown": "markdown",
+  ".html": "html",
+  ".htm": "html",
+  ".png": "png",
+  ".jpg": "jpg",
+  ".jpeg": "jpg",
+  ".webp": "webp",
+  ".pdf": "pdf",
+};
+
+const TYPE_TO_EXT: Record<ArtifactType, string> = {
+  markdown: "md",
+  html: "html",
+  png: "png",
+  jpg: "jpg",
+  webp: "webp",
+  pdf: "pdf",
+};
+
+export function inferType(name: string): ArtifactType {
   const ext = path.extname(name).toLowerCase();
-  if (ext === ".md" || ext === ".markdown") return "markdown";
-  if (ext === ".html" || ext === ".htm") return "html";
-  throw new CliError("INVALID_INPUT", `unsupported file type: ${ext || "(none)"}`);
+  const type = EXT_TO_TYPE[ext];
+  if (!type) {
+    throw new CliError("INVALID_INPUT", `unsupported file type: ${ext || "(none)"}`);
+  }
+  return type;
 }
 
-export function extFromType(type: "markdown" | "html"): string {
-  return type === "markdown" ? "md" : "html";
+export function extFromType(type: ArtifactType): string {
+  return TYPE_TO_EXT[type];
+}
+
+/**
+ * If both the source path and the explicit name carry recognised extensions,
+ * they must agree. Catches `add photo.png --name report.md`, which would
+ * otherwise silently write PNG bytes into a `.md` artifact and produce an
+ * unrenderable file.
+ */
+export function assertExtCompatible(opts: {
+  sourcePath?: string;
+  explicitName?: string;
+}): void {
+  if (!opts.sourcePath || !opts.explicitName) return;
+  const srcExt = path.extname(opts.sourcePath).toLowerCase();
+  const nameExt = path.extname(opts.explicitName).toLowerCase();
+  const srcType = EXT_TO_TYPE[srcExt];
+  const nameType = EXT_TO_TYPE[nameExt];
+  if (!srcType || !nameType) return;
+  if (srcType !== nameType) {
+    throw new CliError(
+      "INVALID_INPUT",
+      `--name extension (${nameExt}) does not match source extension (${srcExt})`,
+    );
+  }
 }

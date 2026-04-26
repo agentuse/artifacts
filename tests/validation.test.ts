@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveLogicalName, validateName, inferType } from "../src/validation";
+import {
+  assertExtCompatible,
+  resolveLogicalName,
+  validateName,
+  inferType,
+} from "../src/validation";
 import { CliError } from "../src/errors";
 
 describe("validateName", () => {
@@ -82,8 +87,43 @@ describe("inferType", () => {
     expect(inferType("a.html")).toBe("html");
     expect(inferType("a.htm")).toBe("html");
   });
+  it("png/jpg/jpeg/webp", () => {
+    expect(inferType("a.png")).toBe("png");
+    expect(inferType("a.jpg")).toBe("jpg");
+    expect(inferType("a.jpeg")).toBe("jpg");
+    expect(inferType("a.webp")).toBe("webp");
+  });
+  it("pdf", () => {
+    expect(inferType("a.pdf")).toBe("pdf");
+  });
   it("rejects others", () => {
-    expect(() => inferType("a.png")).toThrow(CliError);
+    expect(() => inferType("a.svg")).toThrow(CliError);
+    expect(() => inferType("a.gif")).toThrow(CliError);
     expect(() => inferType("a")).toThrow(CliError);
+  });
+});
+
+describe("assertExtCompatible", () => {
+  it("throws when source and explicit name disagree on known types", () => {
+    expect(() =>
+      assertExtCompatible({ sourcePath: "/x/photo.png", explicitName: "report.md" }),
+    ).toThrow(CliError);
+  });
+  it("allows matching extensions", () => {
+    expect(() =>
+      assertExtCompatible({ sourcePath: "/x/a.png", explicitName: "b.png" }),
+    ).not.toThrow();
+    expect(() =>
+      assertExtCompatible({ sourcePath: "/x/a.jpg", explicitName: "b.jpeg" }),
+    ).not.toThrow();
+  });
+  it("ignores unknown extensions", () => {
+    expect(() =>
+      assertExtCompatible({ sourcePath: "/x/a.bin", explicitName: "b.md" }),
+    ).not.toThrow();
+  });
+  it("no-op when either side missing", () => {
+    expect(() => assertExtCompatible({ explicitName: "b.md" })).not.toThrow();
+    expect(() => assertExtCompatible({ sourcePath: "/x/a.png" })).not.toThrow();
   });
 });
