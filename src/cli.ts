@@ -35,6 +35,27 @@ function parseDuration(input: string): number {
   return n * factor;
 }
 
+/** Suggested-dimension bounds. Matches what the viewer can usefully render:
+ *  smaller than 100px and the tile loses its resize handle / chrome; larger
+ *  than 10000px is well past any realistic display. The viewer also clamps
+ *  on read (defense in depth). */
+const MIN_SUGGESTED_PX = 100;
+const MAX_SUGGESTED_PX = 10000;
+
+function parseDimension(flag: string, raw: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    throw new CliError("INVALID_INPUT", `${flag} must be an integer (got ${raw})`);
+  }
+  if (n < MIN_SUGGESTED_PX || n > MAX_SUGGESTED_PX) {
+    throw new CliError(
+      "INVALID_INPUT",
+      `${flag} out of range: ${n} (allowed ${MIN_SUGGESTED_PX}..${MAX_SUGGESTED_PX})`,
+    );
+  }
+  return n;
+}
+
 function emit(json: boolean, value: unknown, human: () => void): void {
   if (json) {
     process.stdout.write(JSON.stringify(value, null, 2) + "\n");
@@ -87,6 +108,16 @@ export async function runCli(argv: string[]): Promise<void> {
     )
     .option("--force-revision", "create a new revision even on identical hash")
     .option("--max-size <bytes>", `per-artifact byte cap (default ${DEFAULT_MAX_SIZE})`)
+    .option(
+      "--width <px>",
+      "suggested initial tile width in the viewer (integer px). " +
+        "User resize wins; the viewer floors small values.",
+    )
+    .option(
+      "--height <px>",
+      "suggested initial tile height in the viewer (integer px). " +
+        "User resize wins; the viewer floors small values.",
+    )
     .action(async (sources: string[], opts: Record<string, string | boolean>) => {
       const global = program.opts<GlobalOpts>();
       try {
@@ -97,12 +128,22 @@ export async function runCli(argv: string[]): Promise<void> {
           ? parseInt(String(opts["max-size"]), 10)
           : DEFAULT_MAX_SIZE;
         const run = typeof opts.run === "string" ? opts.run : undefined;
+        const suggestedWidth =
+          typeof opts.width === "string"
+            ? parseDimension("--width", opts.width)
+            : undefined;
+        const suggestedHeight =
+          typeof opts.height === "string"
+            ? parseDimension("--height", opts.height)
+            : undefined;
         const inputs: AddInput[] = sources.map((source) => ({
           source,
           name: typeof opts.name === "string" ? opts.name : undefined,
           run,
           forceRevision: !!opts["force-revision"],
           maxSize,
+          suggestedWidth,
+          suggestedHeight,
         }));
         const out = await addArtifacts(inputs);
         const port = isServerRunning()?.port ?? DEFAULT_PORT;

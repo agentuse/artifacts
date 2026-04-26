@@ -184,6 +184,38 @@ html, body, #root {
   outline-offset: -1px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
 }
+/* Bottom-right corner grip for the focused tile. Sits above the body so it
+   catches pointerdown before the body content does. The diagonal stripes
+   are a CSS gradient — no extra DOM. */
+.tile-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  z-index: 5;
+  background:
+    linear-gradient(
+      135deg,
+      transparent 0,
+      transparent 6px,
+      var(--muted) 6px,
+      var(--muted) 7px,
+      transparent 7px,
+      transparent 10px,
+      var(--muted) 10px,
+      var(--muted) 11px,
+      transparent 11px,
+      transparent 14px,
+      var(--muted) 14px,
+      var(--muted) 15px,
+      transparent 15px
+    );
+  opacity: 0.7;
+  touch-action: none;
+}
+.tile-resize-handle:hover { opacity: 1; }
 /* Floating head: rendered as a sibling of TransformWrapper inside
    .canvas-wrap, so it lives in screen space and stays readable at any
    zoom. Position is set imperatively from Canvas.tsx (see

@@ -109,4 +109,38 @@ describe("revision logic", () => {
       ]),
     ).rejects.toThrow(/\.\./);
   });
+
+  it("persists suggested width/height onto the new record", async () => {
+    writeFile("a.md", "# v1");
+    const out = await addArtifacts([
+      {
+        source: path.join(proj, "a.md"),
+        suggestedWidth: 800,
+        suggestedHeight: 600,
+      },
+    ]);
+    const id = out.results[0]?.artifactId;
+    expect(id).toBeTruthy();
+    const all = listArtifacts({ name: "a.md", revisions: true });
+    const rec = all.find((a) => a.artifactId === id)?.record;
+    expect(rec?.suggestedWidth).toBe(800);
+    expect(rec?.suggestedHeight).toBe(600);
+  });
+
+  it("omits suggested fields entirely when not supplied", async () => {
+    writeFile("a.md", "# v1");
+    const out = await addArtifacts([{ source: path.join(proj, "a.md") }]);
+    const id = out.results[0]?.artifactId;
+    const all = listArtifacts({ name: "a.md", revisions: true });
+    const rec = all.find((a) => a.artifactId === id)?.record;
+    expect(rec).toBeDefined();
+    // The keys must be absent (not just undefined) so old-manifest shape is
+    // preserved for records added without --width/--height.
+    expect(Object.prototype.hasOwnProperty.call(rec!, "suggestedWidth")).toBe(
+      false,
+    );
+    expect(Object.prototype.hasOwnProperty.call(rec!, "suggestedHeight")).toBe(
+      false,
+    );
+  });
 });

@@ -86,8 +86,25 @@ Untagged artifacts still work; they just don't show up under a "run" view.
 - `--run <tag>` — see "Run tagging" above. Equivalent to `AGENTUSE_RUN_ID`.
 - `--force-revision` — create a new revision even if content hash is unchanged.
 - `--max-size <bytes>` — per-artifact byte cap.
+- `--width <px>` / `--height <px>` — suggested initial tile size in the viewer (integer pixels, 100..10000). Use this when you know the artifact will look better at a non-default size: e.g. a tall narrow markdown summary, a wide HTML dashboard, a portrait-orientation image. Defaults to 720×720 if unset. **Suggestion only**: if the user has already manually resized the same logical artifact in the viewer, their resize wins (sizes are persisted in the browser and survive new revisions). The viewer also floors small values so an undersized suggestion can't make the tile unusable.
 
-A batch `add` call gets at most one run tag (the first one it sees).
+A batch `add` call gets at most one run tag (the first one it sees). `--width`/`--height` apply to every input in the batch.
+
+#### Picking a suggested size
+
+Match the artifact's content shape, not just its content type:
+
+| Content shape | Suggested w × h |
+| --- | --- |
+| Default markdown report / plan | omit the flags (720×720 is fine) |
+| Long-form essay or chat transcript | `--width 720 --height 1100` |
+| Wide table, dashboard, or chart HTML | `--width 1200 --height 720` |
+| Slide / presentation HTML | `--width 1280 --height 720` |
+| Portrait image / mobile screenshot | `--width 480 --height 900` |
+| Landscape diagram or wide screenshot | `--width 1200 --height 700` |
+| Small inline preview / status card | `--width 480 --height 320` |
+
+Once an artifact exists, re-running `add` with different `--width`/`--height` on **identical content** is a no-op (idempotent skip). If you need to update the suggested size on an existing artifact, change the content or pass `--force-revision`.
 
 ## Examples
 

@@ -14,6 +14,54 @@ const COLS = 2;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 4;
 const FIT_PADDING = 24;
+// Hard floor for resize so the user can't shrink a tile to nothing and lose
+// the resize handle. Maximum is implicit (canvas can grow). The same floor
+// is applied when reading agent-supplied suggestedWidth/suggestedHeight so
+// a misbehaving agent can't ship an unusably tiny tile.
+const MIN_TILE_W = 280;
+const MIN_TILE_H = 200;
+const STORAGE_KEY = "agentuse-artifacts.tile-sizes.v1";
+
+type SizeMap = Record<string, { w: number; h: number }>;
+
+/** sizeOverrides is keyed by `${projectId}/${name}` (NOT artifactId) so a
+ *  user-set size persists across new revisions of the same artifact. */
+const sizeKey = (rec: { projectId: string; name: string }): string =>
+  `${rec.projectId}/${rec.name}`;
+
+function loadStoredSizes(): SizeMap {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: SizeMap = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (
+        v &&
+        typeof v === "object" &&
+        typeof (v as { w?: unknown }).w === "number" &&
+        typeof (v as { h?: unknown }).h === "number"
+      ) {
+        out[k] = {
+          w: (v as { w: number }).w,
+          h: (v as { h: number }).h,
+        };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function persistSizes(map: SizeMap): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Quota / private mode — silently ignore. Sizes still work in-session.
+  }
+}
 // Floating head (Figma frame-label) sits above the focused tile in screen
 // space, so it stays readable at every zoom. Height is fixed in CSS — we
 // reuse the value here for vertical positioning.
@@ -39,6 +87,14 @@ export function Canvas(props: {
   const [revisionOverrides, setRevisionOverrides] = useState<
     Record<string, string>
   >({});
+  // Per-tile size overrides set by the focused-tile resize handle. Keyed by
+  // `${projectId}/${name}` so the size sticks across new revisions of the
+  // same artifact. Hydrated from localStorage on mount; we persist once per
+  // resize gesture (in the pointerup callback inside handleResizeStart),
+  // not on every pointermove, to avoid 60-writes-per-second.
+  const [sizeOverrides, setSizeOverrides] = useState<SizeMap>(() =>
+    loadStoredSizes(),
+  );
   // Default to the latest revision of the same (project, name) so the
   // fullscreen overlay and floating head hot-reload when a new revision
   // arrives. Without this, expandedId is frozen at the moment the user hit
@@ -55,17 +111,57 @@ export function Canvas(props: {
   const setShowIdFor = (id: string, next: string) =>
     setRevisionOverrides((prev) => ({ ...prev, [id]: next }));
 
-  const tiles = artifacts.map(([id, rec], i) => {
-    const col = i % COLS;
-    const row = Math.floor(i / COLS);
-    const x = GAP + col * (TILE_W + GAP);
-    const y = GAP + row * (TILE_H + GAP);
-    return { id, rec, x, y };
-  });
-
-  const rows = Math.ceil(artifacts.length / COLS) || 1;
-  const canvasW = COLS * (TILE_W + GAP) + GAP;
-  const canvasH = rows * (TILE_H + GAP) + GAP;
+  // Row-flow layout. Baseline row width = the original 2-column grid; tiles
+  // get placed left-to-right and wrap when the next tile won't fit. Row
+  // height = max height of tiles in that row, so a taller (resized) tile
+  // pushes the next row down without overlapping. A tile wider than the
+  // baseline takes the row to itself and stretches the canvas.
+  const baselineRowWidth = COLS * TILE_W + (COLS + 1) * GAP;
+  type LaidOut = {
+    id: string;
+    rec: ArtifactRecord;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+  const tiles: LaidOut[] = [];
+  let cursorX = GAP;
+  let cursorY = GAP;
+  let rowMaxH = 0;
+  let layoutMaxRight = 0;
+  for (const [id, rec] of artifacts) {
+    // Size precedence: user override > agent-suggested > default. Suggested
+    // values come from the artifact record (set at `add` time via
+    // --width/--height). The viewer floors them at MIN_TILE_W/H so a
+    // misbehaving agent can't ship an unusably tiny tile.
+    const ov = sizeOverrides[sizeKey(rec)];
+    const w =
+      ov?.w ??
+      (rec.suggestedWidth != null
+        ? Math.max(MIN_TILE_W, rec.suggestedWidth)
+        : TILE_W);
+    const h =
+      ov?.h ??
+      (rec.suggestedHeight != null
+        ? Math.max(MIN_TILE_H, rec.suggestedHeight)
+        : TILE_H);
+    // Wrap when this tile doesn't fit in the remaining row width. The
+    // `cursorX > GAP` guard prevents an empty wrap when the tile alone is
+    // wider than baselineRowWidth — it just takes the row.
+    if (cursorX > GAP && cursorX + w + GAP > baselineRowWidth) {
+      cursorX = GAP;
+      cursorY += rowMaxH + GAP;
+      rowMaxH = 0;
+    }
+    tiles.push({ id, rec, x: cursorX, y: cursorY, w, h });
+    cursorX += w + GAP;
+    rowMaxH = Math.max(rowMaxH, h);
+    layoutMaxRight = Math.max(layoutMaxRight, cursorX);
+  }
+  const layoutMaxBottom = cursorY + rowMaxH + GAP;
+  const canvasW = Math.max(baselineRowWidth, layoutMaxRight);
+  const canvasH = artifacts.length === 0 ? GAP * 2 + TILE_H : layoutMaxBottom;
 
   // iPad Safari fires gesturestart/change/end for trackpad pinch. We cancel
   // them so Safari doesn't try to page-zoom the SPA. NOTE: iPadOS captures
@@ -256,14 +352,60 @@ export function Canvas(props: {
   const focusedTile = focusedId ? tiles.find((t) => t.id === focusedId) : null;
   useEffect(() => {
     focusedRectRef.current = focusedTile
-      ? { x: focusedTile.x, y: focusedTile.y, w: TILE_W }
+      ? { x: focusedTile.x, y: focusedTile.y, w: focusedTile.w }
       : null;
     // Defer to next frame so the head element exists in the DOM when we
     // size it (it's conditionally rendered).
     const id = requestAnimationFrame(() => positionFloatingHead());
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusedId, focusedTile?.x, focusedTile?.y]);
+  }, [focusedId, focusedTile?.x, focusedTile?.y, focusedTile?.w]);
+
+  // Drag-to-resize for the focused tile. Start size is captured at
+  // pointerdown so each frame sets an absolute size — avoids drift from
+  // accumulated deltas if React batches updates. Pointer deltas are in
+  // screen pixels; divide by current canvas scale to translate into the
+  // tile's own coordinate space. Persistence happens once on pointerup
+  // (not on every move) — the move callback only mutates React state.
+  const handleResizeStart = (
+    key: string,
+    startW: number,
+    startH: number,
+    e: React.PointerEvent,
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    let lastSize = { w: startW, h: startH };
+    const onMove = (ev: PointerEvent) => {
+      const scale = transformStateRef.current.scale || 1;
+      const dx = (ev.clientX - startClientX) / scale;
+      const dy = (ev.clientY - startClientY) / scale;
+      const next = {
+        w: Math.max(MIN_TILE_W, startW + dx),
+        h: Math.max(MIN_TILE_H, startH + dy),
+      };
+      lastSize = next;
+      setSizeOverrides((prev) => ({ ...prev, [key]: next }));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      // Read the current map and merge our final size, then persist. Using
+      // setSizeOverrides here would re-render unnecessarily; we already set
+      // the same value during the last move.
+      setSizeOverrides((prev) => {
+        const merged = { ...prev, [key]: lastSize };
+        persistSizes(merged);
+        return merged;
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
 
   // Resolve focused-tile state for the floating head's controls.
   const focusedShowId = focusedId ? showIdFor(focusedId) : null;
@@ -325,7 +467,7 @@ export function Canvas(props: {
                   height: canvasH,
                 }}
               >
-                {tiles.map(({ id, rec, x, y }) => (
+                {tiles.map(({ id, rec, x, y, w, h }) => (
                   <TileWrapper
                     key={id}
                     artifactId={id}
@@ -333,11 +475,14 @@ export function Canvas(props: {
                     manifest={props.manifest}
                     x={x}
                     y={y}
-                    w={TILE_W}
-                    h={TILE_H}
+                    w={w}
+                    h={h}
                     focused={focusedId === id}
                     onFocus={() => setFocusedId(id)}
                     onExpand={() => onExpandedChange(id)}
+                    onResizeStart={(e) =>
+                      handleResizeStart(sizeKey(rec), w, h, e)
+                    }
                     showId={showIdFor(id)}
                     onShowIdChange={(next) => setShowIdFor(id, next)}
                   />
@@ -416,6 +561,7 @@ type TileWrapperProps = {
       onExpand: () => void;
       focused?: boolean;
       onFocus?: () => void;
+      onResizeStart?: (e: React.PointerEvent) => void;
       onClose?: never;
     }
   | {
@@ -424,6 +570,7 @@ type TileWrapperProps = {
       onExpand?: never;
       focused?: never;
       onFocus?: never;
+      onResizeStart?: never;
       x?: never;
       y?: never;
       w?: never;
@@ -512,6 +659,18 @@ function TileWrapper(props: TileWrapperProps) {
       >
         <Tile artifactId={props.showId} type={showRec.type} />
       </div>
+      {/* Resize handle is only meaningful for a focused, non-expanded tile;
+          fullscreen has no concept of size, and previews swallow pointer
+          events. The handler stops propagation so the canvas pan/focus
+          logic doesn't fire during a resize drag. */}
+      {props.focused && !props.expanded && props.onResizeStart && (
+        <div
+          className="tile-resize-handle"
+          onPointerDown={props.onResizeStart}
+          aria-label="resize tile"
+          title="drag to resize"
+        />
+      )}
     </div>
   );
 }

@@ -37,6 +37,11 @@ export interface AddInput {
   run?: string;
   /** Override max-size (bytes). */
   maxSize?: number;
+  /** Agent-supplied suggested initial tile size for the viewer, in CSS px.
+   *  Stored on the artifact record; the viewer treats it as a suggestion
+   *  only (user resize wins). */
+  suggestedWidth?: number;
+  suggestedHeight?: number;
 }
 
 export interface AddResult {
@@ -195,6 +200,15 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
         contentHash: p.contentHash,
         size: p.buf.length,
         createdAt: new Date().toISOString(),
+        // Omit when undefined to match the existing pattern (e.g. runId
+        // above); keeps records minimal and preserves old-manifest shape
+        // when no agent-supplied size was provided.
+        ...(p.input.suggestedWidth != null
+          ? { suggestedWidth: p.input.suggestedWidth }
+          : {}),
+        ...(p.input.suggestedHeight != null
+          ? { suggestedHeight: p.input.suggestedHeight }
+          : {}),
       };
       manifest.artifacts[artifactId] = record;
       manifest.latest[project.projectId] ??= {};

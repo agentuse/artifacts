@@ -27,6 +27,10 @@ export interface ArtifactRecord {
   contentHash: string;
   size: number;
   createdAt: string;
+  /** Agent-supplied initial tile size in CSS px. Suggestion only — the
+   *  viewer's persisted user-resize wins, and small values get floored. */
+  suggestedWidth?: number;
+  suggestedHeight?: number;
 }
 
 export interface Manifest {

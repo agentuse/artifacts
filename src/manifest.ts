@@ -29,6 +29,13 @@ export interface ArtifactRecord {
   contentHash: string;
   size: number;
   createdAt: string;
+  /** Agent-supplied initial tile size (pixels) for the viewer. The viewer
+   *  treats these as suggestions only — the user's persisted resize wins,
+   *  and the viewer floors them at its own minimums. Adding these is a
+   *  purely additive schema change; old manifests read fine (missing =
+   *  undefined), so we deliberately do NOT bump SCHEMA_VERSION. */
+  suggestedWidth?: number;
+  suggestedHeight?: number;
 }
 
 export interface Manifest {
