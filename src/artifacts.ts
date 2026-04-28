@@ -22,6 +22,7 @@ import {
   resolveLogicalName,
 } from "./validation.js";
 import { ProjectInfo, resolveProject } from "./project.js";
+import { readImageDims } from "./imageDims.js";
 
 export const DEFAULT_MAX_SIZE = 25 * 1024 * 1024;
 
@@ -117,6 +118,7 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
     type: ArtifactType;
     buf: Buffer;
     contentHash: string;
+    natural?: { width: number; height: number };
   };
   const prepared: Prepared[] = [];
   for (const input of inputs) {
@@ -134,7 +136,18 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
     });
     const type = inferType(name);
     const { buf } = await readSource(input.source, maxSize);
-    prepared.push({ input, name, type, buf, contentHash: sha256(buf) });
+    const natural =
+      type === "png" || type === "jpg" || type === "webp"
+        ? readImageDims(type, buf)
+        : undefined;
+    prepared.push({
+      input,
+      name,
+      type,
+      buf,
+      contentHash: sha256(buf),
+      ...(natural ? { natural } : {}),
+    });
   }
 
   const results: AddResult[] = [];
@@ -208,6 +221,12 @@ export async function addArtifacts(inputs: AddInput[]): Promise<AddBatchResult> 
           : {}),
         ...(p.input.suggestedHeight != null
           ? { suggestedHeight: p.input.suggestedHeight }
+          : {}),
+        ...(p.natural
+          ? {
+              naturalWidth: p.natural.width,
+              naturalHeight: p.natural.height,
+            }
           : {}),
       };
       manifest.artifacts[artifactId] = record;
@@ -383,6 +402,15 @@ export async function revertArtifact(opts: {
       contentHash,
       size: buf.length,
       createdAt: new Date().toISOString(),
+      // Image dimensions are an intrinsic property of the bytes, so a revert
+      // (which copies bytes from a prior revision) inherits the source's
+      // probed values rather than re-reading the header.
+      ...(target.record.naturalWidth != null
+        ? { naturalWidth: target.record.naturalWidth }
+        : {}),
+      ...(target.record.naturalHeight != null
+        ? { naturalHeight: target.record.naturalHeight }
+        : {}),
     };
     manifest.artifacts[newId] = record;
     manifest.latest[project.projectId] ??= {};
@@ -509,6 +537,26 @@ export async function fsck(): Promise<{ rebuilt: boolean; issues: string[] }> {
       if (!fs.existsSync(file)) {
         issues.push(`missing file for ${id} (${a.name} v${a.revision})`);
         continue;
+      }
+      // Backfill natural image dimensions for artifacts ingested before the
+      // probe existed. The viewer's tile-size precedence prefers natural
+      // dims over agent-suggested ones, so a missing-but-recoverable value
+      // here is what causes old image artifacts to letterbox.
+      if (
+        (a.type === "png" || a.type === "jpg" || a.type === "webp") &&
+        (a.naturalWidth == null || a.naturalHeight == null)
+      ) {
+        try {
+          const dims = readImageDims(a.type, fs.readFileSync(file));
+          if (dims) {
+            a.naturalWidth = dims.width;
+            a.naturalHeight = dims.height;
+          }
+        } catch (e) {
+          issues.push(
+            `could not probe dimensions for ${id} (${a.name}): ${(e as Error).message}`,
+          );
+        }
       }
       const cur = newLatest[a.projectId]?.[a.name];
       if (!cur || (manifest.artifacts[cur]?.revision ?? -1) < a.revision) {

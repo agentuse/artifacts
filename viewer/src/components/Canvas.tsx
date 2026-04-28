@@ -4,7 +4,16 @@ import {
   TransformComponent,
   type ReactZoomPanPinchRef,
 } from "react-zoom-pan-pinch";
-import type { ArtifactRecord, Manifest } from "../types";
+import {
+  Check,
+  Copy,
+  Download,
+  Maximize2,
+  Minus,
+  Plus,
+  X,
+} from "lucide-react";
+import type { ArtifactRecord, ArtifactType, Manifest } from "../types";
 import { Tile } from "./Tile";
 
 const TILE_W = 720;
@@ -54,6 +63,31 @@ function loadStoredSizes(): SizeMap {
   } catch {
     return {};
   }
+}
+
+/** Fit the image's natural dimensions into a TILE_W bounding box (whichever
+ *  side is larger pegs to TILE_W; the other shrinks proportionally), then
+ *  floor at MIN_TILE_W/H so a tiny thumbnail still gets a usable tile. The
+ *  body's `object-fit: contain` upscales the rendered image when the tile
+ *  ends up larger than the natural pixels — same behavior we already had
+ *  for an oversized 720×720 tile. Returns undefined when the record isn't
+ *  an image or natural dims weren't probed (old artifact, malformed file). */
+function naturalDefault(
+  rec: { type: string; naturalWidth?: number; naturalHeight?: number },
+): { w: number; h: number } | undefined {
+  if (rec.type !== "png" && rec.type !== "jpg" && rec.type !== "webp") {
+    return undefined;
+  }
+  const nw = rec.naturalWidth;
+  const nh = rec.naturalHeight;
+  if (nw == null || nh == null || nw <= 0 || nh <= 0) return undefined;
+  const aspect = nw / nh;
+  const w = aspect >= 1 ? TILE_W : TILE_W * aspect;
+  const h = aspect >= 1 ? TILE_W / aspect : TILE_W;
+  return {
+    w: Math.max(MIN_TILE_W, Math.round(w)),
+    h: Math.max(MIN_TILE_H, Math.round(h)),
+  };
 }
 
 function persistSizes(map: SizeMap): void {
@@ -145,18 +179,26 @@ export function Canvas(props: {
   let rowMaxH = 0;
   let layoutMaxRight = 0;
   for (const [id, rec] of artifacts) {
-    // Size precedence: user override > agent-suggested > default. Suggested
-    // values come from the artifact record (set at `add` time via
-    // --width/--height). The viewer floors them at MIN_TILE_W/H so a
-    // misbehaving agent can't ship an unusably tiny tile.
+    // Size precedence:
+    //   user override > image natural (aspect-fit) > agent-suggested > default
+    // Natural pixels are intrinsic to the file — when we have them they are
+    // a better source of truth than an agent's dimension hint, which is
+    // a guess and can be aspect-wrong (e.g. an agent passing 720×1100 for
+    // a landscape PNG, which letterboxes inside a portrait tile). Suggested
+    // remains the fallback for old artifacts that predate the natural-dim
+    // probe (run `artifacts fsck` to backfill). MIN_TILE_W/H floors keep
+    // a tiny image from collapsing to an unusable size.
     const ov = sizeOverrides[sizeKey(rec)];
+    const natural = naturalDefault(rec);
     const w =
       ov?.w ??
+      natural?.w ??
       (rec.suggestedWidth != null
         ? Math.max(MIN_TILE_W, rec.suggestedWidth)
         : TILE_W);
     const h =
       ov?.h ??
+      natural?.h ??
       (rec.suggestedHeight != null
         ? Math.max(MIN_TILE_H, rec.suggestedHeight)
         : TILE_H);
@@ -484,9 +526,13 @@ export function Canvas(props: {
         {({ zoomIn, zoomOut }) => (
           <>
             <div className="toolbar">
-              <button onClick={() => zoomOut()}>−</button>
+              <button onClick={() => zoomOut()} aria-label="zoom out">
+                <Minus size={16} strokeWidth={2} />
+              </button>
               <button onClick={fitToContent}>fit</button>
-              <button onClick={() => zoomIn()}>+</button>
+              <button onClick={() => zoomIn()} aria-label="zoom in">
+                <Plus size={16} strokeWidth={2} />
+              </button>
             </div>
             <TransformComponent
               wrapperStyle={{ width: "100%", height: "100%" }}
@@ -543,13 +589,18 @@ export function Canvas(props: {
               ))}
             </select>
           </span>
+          <TileActions
+            artifactId={focusedShowId ?? focusedId}
+            type={focusedShowRec.type}
+            name={focusedShowRec.name}
+          />
           <button
             className="icon-btn"
             onClick={() => onExpandedChange(focusedId)}
             aria-label="fullscreen"
             title="fullscreen"
           >
-            ⤢
+            <Maximize2 size={16} strokeWidth={2} />
           </button>
           <button
             className="icon-btn"
@@ -557,7 +608,7 @@ export function Canvas(props: {
             aria-label="exit focus"
             title="exit focus (esc)"
           >
-            ✕
+            <X size={16} strokeWidth={2} />
           </button>
         </div>
       )}
@@ -671,6 +722,11 @@ function TileWrapper(props: TileWrapperProps) {
               ))}
             </select>
           </span>
+          <TileActions
+            artifactId={props.showId}
+            type={showRec.type}
+            name={showRec.name}
+          />
           {props.expanded ? (
             <button
               className="icon-btn"
@@ -678,7 +734,7 @@ function TileWrapper(props: TileWrapperProps) {
               aria-label="exit fullscreen"
               title="exit fullscreen (esc)"
             >
-              ✕
+              <X size={16} strokeWidth={2} />
             </button>
           ) : null}
         </div>
@@ -714,5 +770,59 @@ function TileWrapper(props: TileWrapperProps) {
         />
       )}
     </div>
+  );
+}
+
+// Both Download and Copy go through /api/raw/:id so they return the exact
+// file the agent wrote — notably the original (unsanitized) HTML rather
+// than what the viewer iframe sees. /api/render/:id stays the rendering
+// path; /api/raw/:id is for "give me the file."
+function TileActions(props: {
+  artifactId: string;
+  type: ArtifactType;
+  name: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const rawUrl = `/api/raw/${props.artifactId}`;
+  const filename = props.name.split("/").pop() || props.name;
+  const isText = props.type === "markdown" || props.type === "html";
+  const onCopy = async () => {
+    try {
+      const res = await fetch(rawUrl, { cache: "no-store" });
+      if (!res.ok) throw new Error(String(res.status));
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Clipboard / fetch failed — leave UI unchanged. No toast system here.
+    }
+  };
+  return (
+    <>
+      <a
+        className="icon-btn"
+        href={rawUrl}
+        download={filename}
+        aria-label="download"
+        title={`download ${filename}`}
+      >
+        <Download size={16} strokeWidth={2} />
+      </a>
+      {isText && (
+        <button
+          className="icon-btn"
+          onClick={onCopy}
+          aria-label={copied ? "copied" : "copy"}
+          title="copy to clipboard"
+        >
+          {copied ? (
+            <Check size={16} strokeWidth={2} />
+          ) : (
+            <Copy size={16} strokeWidth={2} />
+          )}
+        </button>
+      )}
+    </>
   );
 }

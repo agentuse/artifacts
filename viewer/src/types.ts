@@ -31,6 +31,12 @@ export interface ArtifactRecord {
    *  viewer's persisted user-resize wins, and small values get floored. */
   suggestedWidth?: number;
   suggestedHeight?: number;
+  /** Natural pixel dimensions for image artifacts (png/jpg/webp), probed at
+   *  ingest. Used to pick a tile default whose aspect ratio matches the
+   *  image so non-square images don't letterbox. Lower precedence than a
+   *  user resize or the agent-supplied suggestedWidth/Height. */
+  naturalWidth?: number;
+  naturalHeight?: number;
 }
 
 export interface Manifest {

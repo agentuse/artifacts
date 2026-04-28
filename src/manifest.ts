@@ -36,6 +36,14 @@ export interface ArtifactRecord {
    *  undefined), so we deliberately do NOT bump SCHEMA_VERSION. */
   suggestedWidth?: number;
   suggestedHeight?: number;
+  /** Natural pixel dimensions for image artifacts (png/jpg/webp), probed
+   *  from the file header at ingest time. The viewer uses these to pick a
+   *  default tile size that matches the image's aspect ratio so square
+   *  tiles don't letterbox portrait/landscape images. Lower precedence
+   *  than suggestedWidth/Height and a user resize. Additive, no schema
+   *  bump. */
+  naturalWidth?: number;
+  naturalHeight?: number;
 }
 
 export interface Manifest {
