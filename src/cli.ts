@@ -5,7 +5,6 @@ import {
   DEFAULT_MAX_SIZE,
   addArtifacts,
   fsck,
-  listArtifacts,
   prune,
   removeRevision,
   revertArtifact,
@@ -15,6 +14,15 @@ import {
 } from "./artifacts.js";
 import { rootDir } from "./paths.js";
 import { resolveProject } from "./project.js";
+import {
+  forgetProject,
+  initProject,
+  listLocalArtifactsForCurrentProject,
+  listRegisteredProjects,
+  openBrowser,
+  pruneMissingProjects,
+  registerProjectPath,
+} from "./localArtifacts.js";
 import {
   DEFAULT_PORT,
   isServerRunning,
@@ -95,6 +103,45 @@ export async function runCli(argv: string[]): Promise<void> {
     .description("Collect and view artifacts emitted by AI agents")
     .option("--json", "emit machine-readable JSON")
     .allowExcessArguments(false);
+
+  program
+    .command("init")
+    .description("Create .agentuse/artifacts and register the current project")
+    .action(async () => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const out = await initProject();
+        emit(global.json, out, () => {
+          human(`✓ initialized ${out.project.name}`);
+          human(`  ${out.artifactsDir}`);
+        });
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  program
+    .command("open")
+    .description("Register current project, ensure the viewer is running, and print/open its URL")
+    .option("--port <n>", `preferred port when starting the server (default ${DEFAULT_PORT})`)
+    .option("--detach", "run server in background when starting it")
+    .option("--no-browser", "do not open the browser")
+    .action(async (opts: Record<string, string | boolean>) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const project = await registerProjectPath(process.cwd());
+        const existing = isServerRunning();
+        const status = existing ?? await startServer({
+          preferredPort: opts.port ? parseInt(String(opts.port), 10) : DEFAULT_PORT,
+          detach: !!opts.detach,
+        });
+        const url = `http://127.0.0.1:${status.port}/p/${encodeURIComponent(project.projectId)}`;
+        if (opts.browser !== false && !global.json) openBrowser(url);
+        emit(global.json, { project, server: status, url }, () => human(`viewer: ${url}`));
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
 
   program
     .command("add")
@@ -184,34 +231,33 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .command("list")
-    .description("List artifacts")
-    .option("--project <name>", "filter by project name")
-    .option("--run <runId>", "filter by run id")
-    .option("--name <name>", "filter by artifact name")
-    .option("--revisions", "include all revisions, not just latest")
-    .action((opts: Record<string, string | boolean>) => {
+    .description("List project-local artifacts in .agentuse/artifacts")
+    .action(() => {
       const global = program.opts<GlobalOpts>();
       try {
-        const items = listArtifacts({
-          projectName: typeof opts.project === "string" ? opts.project : undefined,
-          runId: typeof opts.run === "string" ? opts.run : undefined,
-          name: typeof opts.name === "string" ? opts.name : undefined,
-          revisions: !!opts.revisions,
-        });
+        const out = listLocalArtifactsForCurrentProject();
         emit(
           global.json,
-          { artifacts: items },
+          {
+            project: out.project,
+            artifactsDir: out.artifactsDir,
+            artifacts: out.artifacts.map((a) => ({
+              artifactId: a.artifactId,
+              name: a.record.name,
+              type: a.record.type,
+              entry: a.entry,
+              size: a.record.size,
+            })),
+          },
           () => {
-            if (items.length === 0) {
-              human("(no artifacts)");
+            if (!out.artifacts.length) {
+              human(`No local artifacts found in ${out.artifactsDir}`);
+              human("Run `artifacts init`, then save files under .agentuse/artifacts/.");
               return;
             }
-            for (const it of items) {
-              const tag = it.isLatest ? "latest" : "      ";
-              const runTag = it.record.runId ? `  run=${it.record.runId}` : "";
-              human(
-                `  ${tag}  ${it.record.name}  v${it.record.revision}  ${fmtSize(it.record.size)}  ${it.artifactId}${runTag}`,
-              );
+            human(`Artifacts in ${out.project.name}:`);
+            for (const a of out.artifacts) {
+              human(`  ${a.record.name}  ${a.record.type}  ${fmtSize(a.record.size)}  ${a.entry}`);
             }
           },
         );
@@ -347,6 +393,76 @@ export async function runCli(argv: string[]): Promise<void> {
       emit(global.json, { schemaVersion: 1, ranMigrations: [] }, () =>
         human("schema is up to date (v1)"),
       );
+    });
+
+  const project = program
+    .command("project")
+    .description("Manage registered project directories");
+
+  project
+    .command("list")
+    .description("List registered projects")
+    .action(() => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const projects = listRegisteredProjects();
+        emit(
+          global.json,
+          { projects: projects.map(([projectId, p]) => ({ projectId, ...p })) },
+          () => {
+            if (projects.length === 0) {
+              human("(no registered projects)");
+              return;
+            }
+            for (const [projectId, p] of projects) {
+              human(`  ${projectId}  ${p.name}  ${p.path}`);
+            }
+          },
+        );
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  project
+    .command("add")
+    .description("Register a project directory and create its .agentuse/artifacts folder")
+    .argument("[dir]", "project directory", ".")
+    .action(async (dir: string) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const out = await initProject(dir);
+        emit(global.json, out, () => human(`✓ registered ${out.project.name} (${out.project.path})`));
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  project
+    .command("forget")
+    .description("Remove a project from the registry without deleting files")
+    .argument("<projectIdOrPath>")
+    .action(async (ref: string) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const out = await forgetProject(ref);
+        emit(global.json, out, () => human(`✓ forgot ${out.project.name} (${out.projectId})`));
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  project
+    .command("prune")
+    .description("Forget registered projects whose paths no longer exist")
+    .action(async () => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const removed = await pruneMissingProjects();
+        emit(global.json, { removed }, () => human(`✓ pruned ${removed.length} project(s)`));
+      } catch (e) {
+        fail(global.json, e);
+      }
     });
 
   program

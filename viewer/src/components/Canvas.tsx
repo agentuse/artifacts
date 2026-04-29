@@ -502,7 +502,7 @@ export function Canvas(props: {
   if (artifacts.length === 0) {
     return (
       <div className="canvas-wrap" ref={wrapRef}>
-        <div className="empty">no artifacts in this run</div>
+        <div className="empty">no artifacts in this project</div>
       </div>
     );
   }
@@ -755,7 +755,7 @@ function TileWrapper(props: TileWrapperProps) {
             : undefined
         }
       >
-        <Tile artifactId={props.showId} type={showRec.type} />
+        <Tile artifactId={props.showId} record={showRec} />
       </div>
       {/* Resize handle is only meaningful for a focused, non-expanded tile;
           fullscreen has no concept of size, and previews swallow pointer

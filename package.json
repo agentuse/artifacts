@@ -15,6 +15,7 @@
     "build": "npm run build:viewer && npm run build:cli",
     "build:cli": "tsc -p tsconfig.json",
     "build:viewer": "cd viewer && npm install --silent && npm run build",
+    "link": "npm run build && npm link",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

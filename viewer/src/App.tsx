@@ -3,7 +3,7 @@ import { Menu, X } from "lucide-react";
 import { fetchManifest } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
-import { RunList } from "./components/RunList";
+import { ArtifactList } from "./components/ArtifactList";
 import { Canvas } from "./components/Canvas";
 
 interface Route {
@@ -98,16 +98,6 @@ export function App() {
     const all = Object.entries(manifest.artifacts).filter(
       ([, a]) => a.projectId === route.projectId,
     );
-    if (route.runId) {
-      const byName = new Map<string, [string, ArtifactRecord]>();
-      for (const entry of all) {
-        const [, rec] = entry;
-        if (rec.runId !== route.runId) continue;
-        const cur = byName.get(rec.name);
-        if (!cur || cur[1].revision < rec.revision) byName.set(rec.name, entry);
-      }
-      return [...byName.values()];
-    }
     if (route.artifactName) {
       return all
         .filter(([, a]) => a.name === route.artifactName)
@@ -117,7 +107,7 @@ export function App() {
     return Object.values(latestMap)
       .map((id) => [id, manifest.artifacts[id]] as [string, ArtifactRecord | undefined])
       .filter((e): e is [string, ArtifactRecord] => !!e[1]);
-  }, [manifest, route.projectId, route.runId, route.artifactName, route.revision]);
+  }, [manifest, route.projectId, route.artifactName, route.revision]);
 
   const drawerOpen = !!route.drawerOpen;
 
@@ -129,10 +119,12 @@ export function App() {
     navRoute(next);
   };
 
-  const onSelectRun = (runId: string | undefined) => {
-    // undefined = "Latest" pseudo-entry: clear the run filter and land on
-    // the project's all-latest view.
-    const next: Route = { projectId: route.projectId, runId };
+  const onSelectArtifact = (artifactName: string | undefined) => {
+    const next: Route = {
+      projectId: route.projectId,
+      artifactName,
+      drawerOpen: route.drawerOpen,
+    };
     setRoute(next);
     navRoute(next);
   };
@@ -175,11 +167,11 @@ export function App() {
           selected={route.projectId}
           onSelect={onSelectProject}
         />
-        <RunList
+        <ArtifactList
           manifest={manifest}
           projectId={route.projectId}
-          selected={route.runId}
-          onSelect={onSelectRun}
+          selected={route.artifactName}
+          onSelect={onSelectArtifact}
         />
       </div>
       <div className="backdrop" onClick={() => setDrawerOpen(false)} />

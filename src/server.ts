@@ -8,6 +8,11 @@ import { rootDir, servePidPath, artifactFilePath } from "./paths.js";
 import { readManifest } from "./manifest.js";
 import { extFromType } from "./validation.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
+import {
+  buildLocalManifest,
+  findLocalArtifactById,
+  resolveLocalProjectFile,
+} from "./localArtifacts.js";
 
 export const DEFAULT_PORT = 7878;
 const HOST = "127.0.0.1";
@@ -56,6 +61,10 @@ const MIME: Record<string, string> = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
   ".woff": "font/woff",
@@ -93,8 +102,9 @@ function send(
   };
   // csp: undefined -> default SPA_CSP, string -> custom, null -> omit entirely
   // (used for PDF responses so Firefox PDF.js isn't constrained by SPA_CSP).
-  if (opts.csp === undefined) merged["content-security-policy"] = SPA_CSP;
-  else if (opts.csp !== null) merged["content-security-policy"] = opts.csp;
+  if (opts.csp === undefined) {
+    if (!merged["content-security-policy"]) merged["content-security-policy"] = SPA_CSP;
+  } else if (opts.csp !== null) merged["content-security-policy"] = opts.csp;
   res.writeHead(status, merged);
   res.end(body);
 }
@@ -140,7 +150,7 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
 
   if (pathname === "/api/manifest") {
     try {
-      const m = readManifest();
+      const m = buildLocalManifest();
       send(res, 200, JSON.stringify(m), { "content-type": MIME[".json"]! });
     } catch (e) {
       send(res, 500, (e as Error).message);
@@ -154,8 +164,9 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
   if (artMatch) {
     const id = artMatch[1]!;
     try {
-      const m = readManifest();
-      const rec = m.artifacts[id];
+      const local = findLocalArtifactById(id);
+      const m = local ? undefined : readManifest();
+      const rec = local?.record ?? m?.artifacts[id];
       if (!rec) {
         send(res, 404, "not found");
         return;
@@ -165,7 +176,7 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
         return;
       }
       const ext = extFromType(rec.type);
-      const file = artifactFilePath(rec.projectId, id, ext);
+      const file = local?.absPath ?? artifactFilePath(rec.projectId, id, ext);
       const buf = fs.readFileSync(file);
       if (rec.type === "markdown") {
         send(res, 200, buf, { "content-type": "text/markdown; charset=utf-8" });
@@ -207,14 +218,15 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
   if (rawMatch) {
     const id = rawMatch[1]!;
     try {
-      const m = readManifest();
-      const rec = m.artifacts[id];
+      const local = findLocalArtifactById(id);
+      const m = local ? undefined : readManifest();
+      const rec = local?.record ?? m?.artifacts[id];
       if (!rec) {
         send(res, 404, "not found");
         return;
       }
       const ext = extFromType(rec.type);
-      const file = artifactFilePath(rec.projectId, id, ext);
+      const file = local?.absPath ?? artifactFilePath(rec.projectId, id, ext);
       const buf = fs.readFileSync(file);
       const basename = (rec.name.split("/").pop() || rec.name).replace(
         /[\r\n"\\]/g,
@@ -236,6 +248,55 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
     return;
   }
 
+  // /api/project-artifacts/{projectId}/{path...} -> project-local live
+  // artifact files rooted at <project>/.agentuse/artifacts/. HTML is
+  // sanitized; other files are served as static bytes. Relative URLs inside
+  // HTML work naturally because the iframe URL is the real file path.
+  const localPrefixMatch = /^\/api\/project-artifacts\/([A-Za-z0-9_]+)\/(.*)$/.exec(pathname);
+  if (localPrefixMatch) {
+    const projectId = localPrefixMatch[1]!;
+    const relInput = localPrefixMatch[2]!;
+    try {
+      const file = resolveLocalProjectFile(projectId, relInput);
+      let abs = file.absPath;
+      if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+        const indexHtml = path.join(abs, "index.html");
+        const indexMd = path.join(abs, "index.md");
+        abs = fs.existsSync(indexHtml) ? indexHtml : indexMd;
+      }
+      if (!abs || !fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
+        send(res, 404, "not found");
+        return;
+      }
+      const ext = path.extname(abs).toLowerCase();
+      if (ext === ".html" || ext === ".htm") {
+        const safe = buildSafeSrcdoc(fs.readFileSync(abs, "utf8"));
+        send(res, 200, safe, {
+          "content-type": "text/html; charset=utf-8",
+          "content-security-policy": META_CSP,
+          "x-frame-options": "SAMEORIGIN",
+        });
+        return;
+      }
+      if (ext === ".md" || ext === ".markdown") {
+        send(res, 200, fs.readFileSync(abs), { "content-type": "text/markdown; charset=utf-8" });
+        return;
+      }
+      const csp = ext === ".pdf" ? null : ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp" ? IMAGE_CSP : undefined;
+      send(
+        res,
+        200,
+        fs.readFileSync(abs),
+        { "content-type": MIME[ext] ?? "application/octet-stream" },
+        { csp },
+      );
+    } catch (e) {
+      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
+      send(res, code, (e as Error).message);
+    }
+    return;
+  }
+
   // /api/render/{artifactId}  -> sanitized HTML served as text/html with its
   // own CSP header. Loaded via <iframe src=...> with sandbox="allow-scripts"
   // (no allow-same-origin), so it lives in an opaque origin isolated from the
@@ -245,8 +306,9 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
   if (renderMatch) {
     const id = renderMatch[1]!;
     try {
-      const m = readManifest();
-      const rec = m.artifacts[id];
+      const local = findLocalArtifactById(id);
+      const m = local ? undefined : readManifest();
+      const rec = local?.record ?? m?.artifacts[id];
       if (!rec) {
         send(res, 404, "not found");
         return;
@@ -255,7 +317,7 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
         send(res, 400, "not an html artifact");
         return;
       }
-      const file = artifactFilePath(rec.projectId, id, extFromType(rec.type));
+      const file = local?.absPath ?? artifactFilePath(rec.projectId, id, extFromType(rec.type));
       const buf = fs.readFileSync(file);
       const safe = buildSafeSrcdoc(buf.toString("utf8"));
       send(res, 200, safe, {

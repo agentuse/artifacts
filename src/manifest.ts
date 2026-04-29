@@ -10,6 +10,7 @@ export interface ProjectRecord {
   name: string;
   path: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface RunRecord {
@@ -44,6 +45,10 @@ export interface ArtifactRecord {
    *  bump. */
   naturalWidth?: number;
   naturalHeight?: number;
+  /** Project-local live artifact fields. localEntry is the path under
+   *  <project>/.agentuse/artifacts/ (POSIX separators). */
+  local?: boolean;
+  localEntry?: string;
 }
 
 export interface Manifest {

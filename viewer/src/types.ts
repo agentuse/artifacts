@@ -37,6 +37,8 @@ export interface ArtifactRecord {
    *  user resize or the agent-supplied suggestedWidth/Height. */
   naturalWidth?: number;
   naturalHeight?: number;
+  local?: boolean;
+  localEntry?: string;
 }
 
 export interface Manifest {

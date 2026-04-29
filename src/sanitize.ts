@@ -16,9 +16,9 @@ import { parse, HTMLElement, Node, NodeType } from "node-html-parser";
 export const META_CSP =
   "default-src 'none'; " +
   "script-src 'unsafe-inline' 'unsafe-eval' https:; " +
-  "style-src 'unsafe-inline' https:; " +
-  "font-src https: data:; " +
-  "img-src https: data: blob:; " +
+  "style-src 'self' 'unsafe-inline' https:; " +
+  "font-src 'self' https: data:; " +
+  "img-src 'self' https: data: blob:; " +
   "connect-src 'none'; " +
   "frame-src 'none'; " +
   "object-src 'none'; " +
