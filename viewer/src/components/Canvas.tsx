@@ -640,18 +640,20 @@ export function Canvas(props: {
           className="tile-head tile-head-floating"
         >
           <span className="name">{focusedShowRec.name}</span>
-          <span className="rev">
-            <select
-              value={focusedShowId ?? focusedId}
-              onChange={(e) => setShowIdFor(focusedId, e.target.value)}
-            >
-              {focusedRevisions.map(([id, r]) => (
-                <option key={id} value={id}>
-                  v{r.revision}
-                </option>
-              ))}
-            </select>
-          </span>
+          {focusedRevisions.length > 1 && (
+            <span className="rev">
+              <select
+                value={focusedShowId ?? focusedId}
+                onChange={(e) => setShowIdFor(focusedId, e.target.value)}
+              >
+                {focusedRevisions.map(([id, r]) => (
+                  <option key={id} value={id}>
+                    v{r.revision}
+                  </option>
+                ))}
+              </select>
+            </span>
+          )}
           <TileActions
             artifactId={focusedShowId ?? focusedId}
             type={focusedShowRec.type}
@@ -773,18 +775,20 @@ function TileWrapper(props: TileWrapperProps) {
       {showInTileHead && (
         <div className="tile-head">
           <span className="name">{showRec.name}</span>
-          <span className="rev">
-            <select
-              value={props.showId}
-              onChange={(e) => props.onShowIdChange(e.target.value)}
-            >
-              {revisions.map(([id, r]) => (
-                <option key={id} value={id}>
-                  v{r.revision}
-                </option>
-              ))}
-            </select>
-          </span>
+          {revisions.length > 1 && (
+            <span className="rev">
+              <select
+                value={props.showId}
+                onChange={(e) => props.onShowIdChange(e.target.value)}
+              >
+                {revisions.map(([id, r]) => (
+                  <option key={id} value={id}>
+                    v{r.revision}
+                  </option>
+                ))}
+              </select>
+            </span>
+          )}
           <TileActions
             artifactId={props.showId}
             type={showRec.type}
