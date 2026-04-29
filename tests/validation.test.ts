@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assertExtCompatible,
-  resolveLogicalName,
-  validateName,
-  inferType,
-} from "../src/validation";
+import { validateName, inferType } from "../src/validation";
 import { CliError } from "../src/errors";
 
 describe("validateName", () => {
@@ -40,44 +35,6 @@ describe("validateName", () => {
   });
 });
 
-describe("resolveLogicalName", () => {
-  it("requires --name on stdin", () => {
-    expect(() =>
-      resolveLogicalName({ projectPath: "/tmp", isStdin: true }),
-    ).toThrow(CliError);
-  });
-
-  it("uses basename for outside-project sources", () => {
-    expect(
-      resolveLogicalName({
-        projectPath: "/tmp/proj-A",
-        resolvedSource: "/tmp/elsewhere/report.md",
-        isStdin: false,
-      }),
-    ).toBe("report.md");
-  });
-
-  it("uses project-relative path for inside-project sources", () => {
-    expect(
-      resolveLogicalName({
-        projectPath: "/tmp/proj-A",
-        resolvedSource: "/tmp/proj-A/docs/spec.md",
-        isStdin: false,
-      }),
-    ).toBe("docs/spec.md");
-  });
-
-  it("rejects malicious explicit names", () => {
-    expect(() =>
-      resolveLogicalName({
-        explicitName: "../../etc/passwd",
-        projectPath: "/tmp",
-        isStdin: true,
-      }),
-    ).toThrow(CliError);
-  });
-});
-
 describe("inferType", () => {
   it("md/markdown", () => {
     expect(inferType("a.md")).toBe("markdown");
@@ -100,30 +57,5 @@ describe("inferType", () => {
     expect(() => inferType("a.svg")).toThrow(CliError);
     expect(() => inferType("a.gif")).toThrow(CliError);
     expect(() => inferType("a")).toThrow(CliError);
-  });
-});
-
-describe("assertExtCompatible", () => {
-  it("throws when source and explicit name disagree on known types", () => {
-    expect(() =>
-      assertExtCompatible({ sourcePath: "/x/photo.png", explicitName: "report.md" }),
-    ).toThrow(CliError);
-  });
-  it("allows matching extensions", () => {
-    expect(() =>
-      assertExtCompatible({ sourcePath: "/x/a.png", explicitName: "b.png" }),
-    ).not.toThrow();
-    expect(() =>
-      assertExtCompatible({ sourcePath: "/x/a.jpg", explicitName: "b.jpeg" }),
-    ).not.toThrow();
-  });
-  it("ignores unknown extensions", () => {
-    expect(() =>
-      assertExtCompatible({ sourcePath: "/x/a.bin", explicitName: "b.md" }),
-    ).not.toThrow();
-  });
-  it("no-op when either side missing", () => {
-    expect(() => assertExtCompatible({ explicitName: "b.md" })).not.toThrow();
-    expect(() => assertExtCompatible({ sourcePath: "/x/a.png" })).not.toThrow();
   });
 });

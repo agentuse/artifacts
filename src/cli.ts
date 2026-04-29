@@ -1,17 +1,6 @@
 import { Command } from "commander";
 import { CliError, ErrorEnvelope, envelope, exitCodeFor } from "./errors.js";
-import {
-  AddInput,
-  DEFAULT_MAX_SIZE,
-  addArtifacts,
-  fsck,
-  prune,
-  removeRevision,
-  revertArtifact,
-  viewerArtifactUrl,
-  viewerProjectUrl,
-  viewerRunUrl,
-} from "./artifacts.js";
+import { viewerArtifactUrl, viewerProjectUrl } from "./artifacts.js";
 import { rootDir } from "./paths.js";
 import { resolveProject } from "./project.js";
 import {
@@ -32,36 +21,6 @@ import {
 
 interface GlobalOpts {
   json: boolean;
-}
-
-function parseDuration(input: string): number {
-  const m = /^(\d+)\s*([smhdw])?$/.exec(input.trim());
-  if (!m) throw new CliError("INVALID_INPUT", `bad duration: ${input}`);
-  const n = parseInt(m[1] ?? "0", 10);
-  const unit = (m[2] ?? "s") as "s" | "m" | "h" | "d" | "w";
-  const factor = { s: 1e3, m: 60e3, h: 3.6e6, d: 8.64e7, w: 6.048e8 }[unit];
-  return n * factor;
-}
-
-/** Suggested-dimension bounds. Matches what the viewer can usefully render:
- *  smaller than 100px and the tile loses its resize handle / chrome; larger
- *  than 10000px is well past any realistic display. The viewer also clamps
- *  on read (defense in depth). */
-const MIN_SUGGESTED_PX = 100;
-const MAX_SUGGESTED_PX = 10000;
-
-function parseDimension(flag: string, raw: string): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || !Number.isInteger(n)) {
-    throw new CliError("INVALID_INPUT", `${flag} must be an integer (got ${raw})`);
-  }
-  if (n < MIN_SUGGESTED_PX || n > MAX_SUGGESTED_PX) {
-    throw new CliError(
-      "INVALID_INPUT",
-      `${flag} out of range: ${n} (allowed ${MIN_SUGGESTED_PX}..${MAX_SUGGESTED_PX})`,
-    );
-  }
-  return n;
 }
 
 function emit(json: boolean, value: unknown, human: () => void): void {
@@ -144,92 +103,6 @@ export async function runCli(argv: string[]): Promise<void> {
     });
 
   program
-    .command("add")
-    .description("Add (auto-version) one or more artifacts")
-    .argument("<sources...>", 'file paths, or "-" for stdin (one source only)')
-    .option("--name <name>", "explicit logical name (required for stdin)")
-    .option(
-      "--run <tag>",
-      "tag this batch with a run (same tag = same run; default is untagged). " +
-        "Also reads AGENTUSE_RUN_ID from env.",
-    )
-    .option("--force-revision", "create a new revision even on identical hash")
-    .option("--max-size <bytes>", `per-artifact byte cap (default ${DEFAULT_MAX_SIZE})`)
-    .option(
-      "--width <px>",
-      "suggested initial tile width in the viewer (integer px). " +
-        "User resize wins; the viewer floors small values.",
-    )
-    .option(
-      "--height <px>",
-      "suggested initial tile height in the viewer (integer px). " +
-        "User resize wins; the viewer floors small values.",
-    )
-    .action(async (sources: string[], opts: Record<string, string | boolean>) => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        if (sources.includes("-") && sources.length > 1) {
-          throw new CliError("INVALID_INPUT", 'cannot combine "-" stdin with other sources');
-        }
-        const maxSize = opts["max-size"]
-          ? parseInt(String(opts["max-size"]), 10)
-          : DEFAULT_MAX_SIZE;
-        const run = typeof opts.run === "string" ? opts.run : undefined;
-        const suggestedWidth =
-          typeof opts.width === "string"
-            ? parseDimension("--width", opts.width)
-            : undefined;
-        const suggestedHeight =
-          typeof opts.height === "string"
-            ? parseDimension("--height", opts.height)
-            : undefined;
-        const inputs: AddInput[] = sources.map((source) => ({
-          source,
-          name: typeof opts.name === "string" ? opts.name : undefined,
-          run,
-          forceRevision: !!opts["force-revision"],
-          maxSize,
-          suggestedWidth,
-          suggestedHeight,
-        }));
-        const out = await addArtifacts(inputs);
-        const port = isServerRunning()?.port ?? DEFAULT_PORT;
-        const viewerUrl = out.runId
-          ? viewerRunUrl({ port }, out.project.projectId, out.runId)
-          : viewerProjectUrl({ port }, out.project.projectId);
-
-        emit(
-          global.json,
-          {
-            runId: out.runId,
-            project: out.project,
-            artifacts: out.results,
-            viewerUrl,
-          },
-          () => {
-            human(`✓ Project: ${out.project.name} (${out.project.path})`);
-            if (out.runId) human(`✓ Run: ${out.runId}`);
-            const real = out.results.filter((r) => !r.skipped);
-            if (real.length > 0) human(`✓ Added ${real.length} artifact(s)`);
-            for (const r of out.results) {
-              const tag = r.skipped
-                ? `no change (matches v${r.previousRevision})`
-                : r.previousRevision
-                  ? `was v${r.previousRevision}: ${r.previousArtifactId}`
-                  : "new";
-              human(
-                `  • ${r.name}  v${r.revision}  ${fmtSize(r.size)}  ${r.artifactId}  (${tag})`,
-              );
-            }
-            human(`→ ${viewerUrl}`);
-          },
-        );
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  program
     .command("list")
     .description("List project-local artifacts in .agentuse/artifacts")
     .action(() => {
@@ -268,27 +141,16 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .command("url")
-    .description(
-      "Print viewer URL: project home by default, an artifact when name is given, " +
-        "a run when --run is given.",
-    )
-    .argument("[name]", "artifact name (latest revision unless --revision)")
-    .option("--revision <n>", "specific revision number")
-    .option("--run <tag>", "show URL for a specific run tag")
-    .action((name: string | undefined, opts: Record<string, string>) => {
+    .description("Print viewer URL: project home by default, an artifact when name is given.")
+    .argument("[name]", "artifact name")
+    .action((name: string | undefined) => {
       const global = program.opts<GlobalOpts>();
       try {
         const port = isServerRunning()?.port ?? DEFAULT_PORT;
         const project = resolveProject();
-        let url: string;
-        if (name) {
-          const rev = opts.revision ? parseInt(opts.revision, 10) : undefined;
-          url = viewerArtifactUrl({ port }, project.projectId, name, rev);
-        } else if (opts.run) {
-          url = viewerRunUrl({ port }, project.projectId, opts.run);
-        } else {
-          url = viewerProjectUrl({ port }, project.projectId);
-        }
+        const url = name
+          ? viewerArtifactUrl({ port }, project.projectId, name)
+          : viewerProjectUrl({ port }, project.projectId);
         emit(global.json, { url }, () => human(url));
       } catch (e) {
         fail(global.json, e);
@@ -301,98 +163,6 @@ export async function runCli(argv: string[]): Promise<void> {
     .action(() => {
       const global = program.opts<GlobalOpts>();
       emit(global.json, { path: rootDir() }, () => human(rootDir()));
-    });
-
-  program
-    .command("revert")
-    .description("Roll back: create a new revision with the content of an older one")
-    .argument("<name>")
-    .requiredOption("--to <revision>", "revision number to revert to")
-    .action(async (name: string, opts: { to: string }) => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        const to = parseInt(opts.to, 10);
-        if (!Number.isFinite(to)) throw new CliError("INVALID_INPUT", "bad --to");
-        const result = await revertArtifact({ name, to });
-        emit(global.json, { artifact: result }, () =>
-          human(`✓ ${name} reverted to v${to}; new revision v${result.revision} (${result.artifactId})`),
-        );
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  program
-    .command("rm")
-    .description("Delete a single revision")
-    .argument("<name>")
-    .requiredOption("--revision <n>", "revision number to delete")
-    .action(async (name: string, opts: { revision: string }) => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        const revision = parseInt(opts.revision, 10);
-        if (!Number.isFinite(revision)) throw new CliError("INVALID_INPUT", "bad --revision");
-        const out = await removeRevision({ name, revision });
-        emit(global.json, { removed: out }, () =>
-          human(`✓ removed ${name} v${revision} (${out.artifactId})`),
-        );
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  program
-    .command("prune")
-    .description("Remove old artifacts")
-    .option("--older-than <duration>", "e.g. 30d, 24h, 7d")
-    .option("--keep-latest-only", "keep only the latest revision per name")
-    .action(async (opts: Record<string, string | boolean>) => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        if (!opts["older-than"] && !opts["keep-latest-only"]) {
-          throw new CliError(
-            "INVALID_INPUT",
-            "specify --older-than <duration> or --keep-latest-only",
-          );
-        }
-        const olderThanMs =
-          typeof opts["older-than"] === "string"
-            ? parseDuration(opts["older-than"])
-            : undefined;
-        const out = await prune({
-          olderThanMs,
-          keepLatestOnly: !!opts["keep-latest-only"],
-        });
-        emit(global.json, out, () => human(`✓ pruned ${out.removed.length} artifact(s)`));
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  program
-    .command("fsck")
-    .description("Verify manifest + files; rebuild latest map")
-    .action(async () => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        const out = await fsck();
-        emit(global.json, out, () => {
-          human(`✓ fsck complete${out.issues.length ? "; issues:" : ""}`);
-          for (const issue of out.issues) human(`  ! ${issue}`);
-        });
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  program
-    .command("migrate")
-    .description("Run pending schema migrations")
-    .action(() => {
-      const global = program.opts<GlobalOpts>();
-      emit(global.json, { schemaVersion: 1, ranMigrations: [] }, () =>
-        human("schema is up to date (v1)"),
-      );
     });
 
   const project = program
