@@ -1,40 +1,81 @@
+/* ---------------------------------------------------------------------------
+   @agentuse/artifacts viewer — palette tuned to agentuse.io
+   - Geist Sans / Geist Mono (loaded from index.html)
+   - Phosphor green primary accent (#05df72, Tailwind green-400)
+   - Cyan secondary accent (#00d2ef, Tailwind cyan-400) for revisions
+   - True-black canvas in dark mode, pure white in light mode
+   - Mono labels in tracking-wider uppercase for the terminal feel
+   --------------------------------------------------------------------------- */
+
 :root {
   --pane-total-w: 520px;
-  --bg: #fafaf9;
-  --fg: #1c1917;
-  --muted: #57534e;
-  --border: #e7e5e4;
-  --accent: #c2410c;
+
+  /* Light theme (default). Mirrors the agentuse.io light-mode aesthetic:
+     pure white, near-black ink, restrained chrome, sharp accents. */
+  --bg: #ffffff;
+  --fg: #0a0a0a;
+  --muted: #71717a;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --accent: #00a854;          /* green-600-ish: AA-readable on white */
+  --accent-soft: rgba(0, 168, 84, 0.10);
+  --accent-ring: rgba(0, 168, 84, 0.32);
+  --accent-2: #0e7490;        /* cyan-700: revision pill on light */
+  --accent-2-soft: rgba(14, 116, 144, 0.10);
   --tile-bg: #ffffff;
-  --pane-bg: #f5f5f4;
-  --grid-dot: rgba(0, 0, 0, 0.12);
+  --pane-bg: #fafafa;
+  --pane-bg-elev: #f4f4f5;
+  --grid-dot: rgba(0, 0, 0, 0.10);
+  --shadow-tile: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px -12px rgba(0,0,0,0.12);
+  --shadow-drawer: 12px 0 32px -12px rgba(0,0,0,0.18);
+  --shadow-float: 0 12px 32px -12px rgba(0,0,0,0.22);
+  --focus-ring: 0 0 0 3px var(--accent-ring);
 }
+
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1c1917;
-    --fg: #f5f5f4;
-    --muted: #a8a29e;
-    --border: #292524;
-    --accent: #fb923c;
-    --tile-bg: #1c1917;
-    --pane-bg: #292524;
-    --grid-dot: rgba(255, 255, 255, 0.10);
+    --bg: #0a0a0a;
+    --fg: #fafafa;
+    --muted: #a1a1aa;
+    --border: #1f1f22;
+    --border-strong: #2a2a2e;
+    --accent: #05df72;        /* phosphor green */
+    --accent-soft: rgba(5, 223, 114, 0.10);
+    --accent-ring: rgba(5, 223, 114, 0.30);
+    --accent-2: #00d2ef;      /* cyan-400 */
+    --accent-2-soft: rgba(0, 210, 239, 0.10);
+    --tile-bg: #0f0f10;
+    --pane-bg: #050506;
+    --pane-bg-elev: #111113;
+    --grid-dot: rgba(255, 255, 255, 0.06);
+    --shadow-tile: 0 1px 0 rgba(255,255,255,0.02), 0 8px 24px -12px rgba(0,0,0,0.7);
+    --shadow-drawer: 12px 0 32px -12px rgba(0,0,0,0.6);
+    --shadow-float: 0 12px 32px -12px rgba(0,0,0,0.7);
   }
 }
+
 * { box-sizing: border-box; }
+
 html, body, #root {
   margin: 0;
   padding: 0;
   height: 100%;
   background: var(--bg);
   color: var(--fg);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font-family: "Geist Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  font-feature-settings: "ss01", "cv11", "kern";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+
 .app {
   position: relative;
   height: 100vh;
   overflow: hidden;
 }
+
 /* Panes overlay the canvas instead of participating in layout, so hiding or
    showing them doesn't shift the canvas/zoom position. */
 .drawer {
@@ -50,7 +91,7 @@ html, body, #root {
   overflow: hidden;
   transform: translateX(0);
   opacity: 1;
-  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-drawer);
   transition:
     transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
     opacity 180ms ease;
@@ -61,44 +102,73 @@ html, body, #root {
   opacity: 0;
 }
 .backdrop { display: none; }
+
 .menu-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   position: fixed;
-  top: 10px;
-  left: 10px;
+  top: 12px;
+  left: 12px;
   z-index: 101;
   background: var(--tile-bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  min-width: 48px;
-  min-height: 48px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  min-width: 44px;
+  min-height: 44px;
   padding: 0;
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
   color: inherit;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-tile);
+  transition: border-color 120ms ease, color 120ms ease, transform 120ms ease;
 }
-.menu-btn:hover { color: var(--accent); border-color: var(--accent); }
+.menu-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.menu-btn:active { transform: scale(0.96); }
+
 .pane {
   border-right: 1px solid var(--border);
   background: var(--pane-bg);
   overflow: auto;
 }
+
+/* Section labels styled like terminal-style monospace tags, echoing the
+   hero typography on agentuse.io. */
 .pane h2 {
   margin: 0;
-  padding: 12px 16px;
-  font-size: 11px;
+  padding: 14px 16px;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.14em;
   color: var(--muted);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   background: var(--pane-bg);
 }
+/* The floating menu/close toggle sits at top:12 left:12 (44×44, so its
+   bottom edge is y=56). Pad the leftmost pane's title so "› PROJECTS"
+   sits to the right of the toggle, and push the sort row below y=56 so
+   the toggle doesn't crash into the NAME/UPDATED chips. */
+.drawer .pane:first-child .pane-head h2 {
+  padding-left: 64px;
+}
+.drawer .pane:first-child .sort-toggle {
+  padding-top: 18px;
+}
+/* Subtle phosphor cue: a green caret before the label. */
+.pane h2::before {
+  content: "› ";
+  color: var(--accent);
+  margin-right: 2px;
+}
+
 .pane-head {
   position: sticky;
   top: 0;
@@ -111,65 +181,66 @@ html, body, #root {
   border-bottom: 0;
   flex: 1;
 }
-.pane-title-row {
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--border);
-}
-.pane-title-row h2 {
-  border-bottom: 0;
-}
-.pane-close-btn {
-  width: 36px;
-  height: 36px;
-  margin-right: 8px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.pane-close-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: rgba(127,127,127,0.08);
-}
+
 .sort-toggle {
   display: flex;
   gap: 6px;
-  padding: 0 12px 10px;
+  padding: 0 12px 12px;
 }
 .sort-toggle button {
   flex: 1;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--muted);
-  border-radius: 999px;
-  padding: 6px 8px;
-  font-size: 11px;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
-.sort-toggle button:hover { color: var(--accent); border-color: var(--accent); }
+.sort-toggle button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .sort-toggle button.active {
   color: var(--accent);
-  background: rgba(194,65,12,0.10);
-  border-color: rgba(194,65,12,0.30);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
+
 .list-item {
-  padding: 10px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   font-size: 13px;
   display: block;
   color: inherit;
   text-decoration: none;
+  position: relative;
+  transition: background 120ms ease, color 120ms ease;
 }
-.list-item:hover { background: rgba(127,127,127,0.08); }
-.list-item.selected { background: rgba(194,65,12,0.10); border-left: 3px solid var(--accent); padding-left: 13px; }
-.list-item .secondary { color: var(--muted); font-size: 11px; margin-top: 2px; word-break: break-all; }
+.list-item:hover {
+  background: var(--pane-bg-elev);
+  color: var(--fg);
+}
+.list-item.selected {
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent);
+  padding-left: 14px;
+  color: var(--fg);
+}
+.list-item .secondary {
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  margin-top: 3px;
+  word-break: break-all;
+}
+
 .canvas-wrap {
   position: relative;
   width: 100%;
@@ -185,14 +256,19 @@ html, body, #root {
   width: 100%;
   height: 100%;
 }
+
 .empty {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
   color: var(--muted);
-  font-size: 14px;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
+
 /* Hybrid dot grid: rendered on the un-transformed canvas-wrap so the GPU
    doesn't repaint a transformed background during pan, but --grid-size and
    --grid-bg-x/y are fed from the live zoom-pan state in Canvas.tsx so the
@@ -202,6 +278,7 @@ html, body, #root {
   background-size: var(--grid-size, 24px) var(--grid-size, 24px);
   background-position: var(--grid-bg-x, 0) var(--grid-bg-y, 0);
 }
+
 .tile {
   position: absolute;
   /* Origin stays at (0, 0); per-tile position comes from
@@ -214,14 +291,19 @@ html, body, #root {
   top: 0;
   background: var(--tile-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.05);
+  box-shadow: var(--shadow-tile);
   display: flex;
   flex-direction: column;
-  transition: transform 240ms cubic-bezier(0.22, 0.8, 0.24, 1);
+  transition: transform 240ms cubic-bezier(0.22, 0.8, 0.24, 1),
+              border-color 120ms ease;
   will-change: transform;
 }
+.tile:hover {
+  border-color: var(--border-strong);
+}
+
 /* Fullscreen overlay: pinned to the viewport, not affected by zoom-pan
    and not animated (it's a modal, not a layout reflow). */
 .tile.tile-expanded {
@@ -236,17 +318,22 @@ html, body, #root {
   transform: none;
   transition: none;
 }
+
 @media (prefers-reduced-motion: reduce) {
   .tile,
-  .drawer { transition: none; }
+  .drawer,
+  .menu-btn,
+  .icon-btn,
+  .toolbar button { transition: none; }
 }
+
 /* Icon button: sized to meet Apple HIG's 44×44 minimum touch target so
    it is comfortably tappable on phones / iPad. The visible symbol is a
    16px glyph centered inside that hit area, not the whole button. */
 .icon-btn {
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 0 10px;
   min-width: 44px;
   min-height: 44px;
@@ -258,47 +345,62 @@ html, body, #root {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
-.icon-btn:hover { color: var(--accent); border-color: var(--accent); }
-.icon-btn:active { background: rgba(127,127,127,0.08); }
+.icon-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.icon-btn:active { background: var(--pane-bg-elev); }
+
 .tile-head {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  font-size: 14px;
-  background: var(--pane-bg);
+  font-size: 13.5px;
+  background: var(--pane-bg-elev);
   /* Min-height keeps the bar tall enough to host 44px touch targets even
      when content shrinks to a single short name. */
   min-height: 56px;
 }
 .tile-head .name {
-  font-weight: 600;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-weight: 500;
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  color: var(--fg);
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Revision pill: cyan, the secondary agentuse accent, to keep "current name"
+   (green) and "current revision" (cyan) visually distinct. */
 .tile-head .rev {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  color: var(--accent);
-  background: rgba(194,65,12,0.08);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color: var(--accent-2);
+  background: var(--accent-2-soft);
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  border: none;
-  font-size: 13px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  letter-spacing: 0.02em;
   min-height: 36px;
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
+  transition: border-color 120ms ease;
 }
+.tile-head .rev:hover { border-color: var(--accent-2); }
 .tile-head .rev select {
   background: transparent;
   border: none;
-  color: var(--accent);
+  color: var(--accent-2);
   font: inherit;
   cursor: pointer;
   /* Native pickers on iOS need a minimum tappable height. The pill above
@@ -306,6 +408,7 @@ html, body, #root {
   min-height: 36px;
   padding: 0 4px;
 }
+
 .tile-body-wrap {
   position: relative;
   flex: 1;
@@ -314,6 +417,7 @@ html, body, #root {
   flex-direction: column;
 }
 .tile-body-wrap > .tile-body { flex: 1; }
+
 /* Preview tile: no chrome, body is non-interactive. pointer-events: none
    on .tile-body causes hit-testing to skip the iframe element entirely
    (events to an iframe's document have to enter through the iframe element
@@ -326,11 +430,14 @@ html, body, #root {
 .tile.tile-preview .tile-body-wrap {
   cursor: zoom-in;
 }
+
 .tile.tile-focused {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft), 0 12px 32px -12px rgba(0, 0, 0, 0.4);
 }
+
 /* Bottom-right corner grip for the focused tile. Sits above the body so it
    catches pointerdown before the body content does. The diagonal stripes
    are a CSS gradient — no extra DOM. Sized for finger-tap (≈44px hit
@@ -360,10 +467,12 @@ html, body, #root {
       var(--muted) 34px,
       transparent 34px
     );
-  opacity: 0.7;
+  opacity: 0.55;
   touch-action: none;
+  transition: opacity 120ms ease;
 }
 .tile-resize-handle:hover { opacity: 1; }
+
 /* Floating head: rendered as a sibling of TransformWrapper inside
    .canvas-wrap, so it lives in screen space and stays readable at any
    zoom. Position is set imperatively from Canvas.tsx (see
@@ -375,16 +484,19 @@ html, body, #root {
      - gap). Sized to host 44×44 touch targets per Apple HIG. */
   height: 56px;
   z-index: 50;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--pane-bg);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--pane-bg-elev);
+  box-shadow: var(--shadow-float);
   /* Override .tile-head's bottom border (we share the class for styling
      of name/rev/icon-btn, but the floating variant is a free-standing pill,
      not the top edge of a tile). */
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-strong);
   min-width: 0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
+
 .tile-body {
   flex: 1;
   overflow: auto;
@@ -403,7 +515,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--pane-bg);
+  background: var(--pane-bg-elev);
 }
 .tile-body.image img {
   max-width: 100%;
@@ -411,45 +523,48 @@ html, body, #root {
   object-fit: contain;
   display: block;
 }
+
+/* ----- Markdown rendering ----- */
+
 .tile-body.markdown-body {
-  padding: 48px 32px 96px;
+  padding: 56px 40px 96px;
 }
 .tile-body .markdown {
   max-width: 720px;
   margin: 0 auto;
-  font-family: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont,
-    "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: "Geist Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   font-feature-settings: "ss01", "cv11", "kern";
   font-size: 16px;
   line-height: 1.7;
   color: var(--fg);
-  letter-spacing: -0.003em;
+  letter-spacing: -0.005em;
   word-wrap: break-word;
 }
 .tile-body .markdown > :first-child { margin-top: 0; }
 .tile-body .markdown > :last-child { margin-bottom: 0; }
-.tile-body .markdown p {
-  margin: 0 0 1.1em;
-}
+.tile-body .markdown p { margin: 0 0 1.1em; }
+
 .tile-body .markdown h1,
 .tile-body .markdown h2,
 .tile-body .markdown h3,
 .tile-body .markdown h4,
 .tile-body .markdown h5,
 .tile-body .markdown h6 {
-  font-family: "Inter", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+  font-family: "Geist Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont,
     "SF Pro Display", "Segoe UI", Roboto, sans-serif;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  margin: 1.8em 0 0.6em;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin: 1.9em 0 0.55em;
   color: var(--fg);
 }
 .tile-body .markdown h1 {
-  font-size: 2.1em;
-  letter-spacing: -0.028em;
+  font-size: 2.25em;
+  font-weight: 800;
+  letter-spacing: -0.035em;
   margin-top: 0.2em;
-  padding-bottom: 0.3em;
+  padding-bottom: 0.35em;
   border-bottom: 1px solid var(--border);
 }
 .tile-body .markdown h2 {
@@ -459,16 +574,33 @@ html, body, #root {
 }
 .tile-body .markdown h3 { font-size: 1.25em; }
 .tile-body .markdown h4 { font-size: 1.05em; }
-.tile-body .markdown h5 { font-size: 0.95em; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.tile-body .markdown h6 { font-size: 0.9em; color: var(--muted); }
+.tile-body .markdown h5 {
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.78em;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.tile-body .markdown h6 {
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.75em;
+  font-weight: 500;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
 .tile-body .markdown a {
   color: var(--accent);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
+  transition: text-decoration-thickness 120ms ease;
 }
 .tile-body .markdown a:hover { text-decoration-thickness: 2px; }
+
 .tile-body .markdown strong { font-weight: 650; }
+
 .tile-body .markdown ul,
 .tile-body .markdown ol {
   margin: 0 0 1.1em;
@@ -476,16 +608,18 @@ html, body, #root {
 }
 .tile-body .markdown li { margin: 0.25em 0; }
 .tile-body .markdown li > p { margin: 0.4em 0; }
-.tile-body .markdown li::marker { color: var(--muted); }
+.tile-body .markdown li::marker { color: var(--accent); }
+
 .tile-body .markdown blockquote {
   margin: 1.2em 0;
-  padding: 0.2em 1.1em;
-  border-left: 3px solid var(--accent);
+  padding: 0.5em 1.1em;
+  border-left: 2px solid var(--accent);
   color: var(--muted);
-  font-style: italic;
-  background: rgba(127, 127, 127, 0.04);
-  border-radius: 0 6px 6px 0;
+  background: var(--accent-soft);
+  border-radius: 0 4px 4px 0;
 }
+.tile-body .markdown blockquote p { margin: 0.4em 0; }
+
 .tile-body .markdown hr {
   border: none;
   border-top: 1px solid var(--border);
@@ -497,32 +631,42 @@ html, body, #root {
   border-radius: 6px;
   display: block;
   margin: 1.2em auto;
+  border: 1px solid var(--border);
 }
+
 .tile-body .markdown code {
-  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 0.88em;
-  background: rgba(127, 127, 127, 0.12);
-  padding: 0.15em 0.4em;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  background: var(--pane-bg-elev);
+  border: 1px solid var(--border);
+  padding: 0.1em 0.4em;
   border-radius: 4px;
+  color: var(--accent);
 }
 .tile-body .markdown pre {
-  background: var(--pane-bg);
+  background: var(--pane-bg-elev);
   border: 1px solid var(--border);
-  padding: 14px 16px;
-  border-radius: 8px;
+  padding: 16px 18px;
+  border-radius: 6px;
   overflow-x: auto;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
   margin: 1.2em 0;
 }
 .tile-body .markdown pre code {
   background: transparent;
+  border: none;
   padding: 0;
   border-radius: 0;
   font-size: inherit;
+  color: inherit;
 }
+
 .tile-body .markdown table {
-  border-collapse: collapse;
+  border: 1px solid var(--border);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 6px;
   font-size: 14px;
   margin: 1.2em 0;
   width: 100%;
@@ -531,26 +675,36 @@ html, body, #root {
 }
 .tile-body .markdown th,
 .tile-body .markdown td {
-  border: 1px solid var(--border);
-  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
   text-align: left;
 }
+.tile-body .markdown tr:last-child td { border-bottom: none; }
 .tile-body .markdown th {
-  background: var(--pane-bg);
-  font-weight: 600;
+  background: var(--pane-bg-elev);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
 }
 .tile-body .markdown tr:nth-child(2n) td {
-  background: rgba(127, 127, 127, 0.03);
+  background: rgba(127, 127, 127, 0.025);
 }
+
 .tile-body .markdown kbd {
-  background: var(--pane-bg);
-  border: 1px solid var(--border);
+  background: var(--pane-bg-elev);
+  border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
   border-radius: 4px;
   padding: 1px 6px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 0.85em;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.82em;
 }
+
+/* ----- Toolbar (zoom in/out/fit) ----- */
+
 .toolbar {
   position: absolute;
   top: 12px;
@@ -561,21 +715,30 @@ html, body, #root {
 }
 .toolbar button {
   background: var(--tile-bg);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   /* HIG-compliant 44×44 touch targets (zoom in/out/fit). */
   min-width: 44px;
   min-height: 44px;
   padding: 0 14px;
-  font-size: 15px;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
   cursor: pointer;
   color: inherit;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-shadow: var(--shadow-tile);
+  transition: border-color 120ms ease, color 120ms ease, transform 120ms ease;
 }
-.toolbar button:hover { border-color: var(--accent); color: var(--accent); }
-.toolbar button:active { background: var(--pane-bg); }
+.toolbar button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.toolbar button:active {
+  background: var(--pane-bg-elev);
+  transform: scale(0.96);
+}
 
 /* ---- Narrow viewports (iPad portrait, split view, phones) ---- */
 @media (max-width: 900px) {
@@ -604,7 +767,7 @@ html, body, #root {
     transition:
       transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
       opacity 180ms ease;
-    box-shadow: 0 0 24px rgba(0, 0, 0, 0.18);
+    box-shadow: var(--shadow-drawer);
   }
   .app.drawer-open .drawer { transform: translateX(0); }
   .app.panes-hidden .drawer {
@@ -629,7 +792,7 @@ html, body, #root {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: rgba(0, 0, 0, 0.45);
     z-index: 99;
   }
   /* Avoid colliding with the menu button. */

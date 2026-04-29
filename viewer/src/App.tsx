@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Menu } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { fetchManifest } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
@@ -163,22 +163,19 @@ export function App() {
 
   return (
     <div className={"app" + (drawerOpen ? " drawer-open" : "") + (panesHidden ? " panes-hidden" : "")}>
-      {panesHidden && (
-        <button
-          className="menu-btn"
-          onClick={() => setDrawerOpen(true)}
-          aria-label="show panes"
-          title="show panes"
-        >
-          <Menu size={18} strokeWidth={2} />
-        </button>
-      )}
+      <button
+        className="menu-btn"
+        onClick={() => setDrawerOpen(panesHidden)}
+        aria-label={panesHidden ? "show panes" : "hide panes"}
+        title={panesHidden ? "show panes" : "hide panes"}
+      >
+        {panesHidden ? <Menu size={18} strokeWidth={2} /> : <X size={18} strokeWidth={2} />}
+      </button>
       <div className="drawer">
         <Sidebar
           projects={manifest.projects}
           selected={route.projectId}
           onSelect={onSelectProject}
-          onClose={() => setDrawerOpen(false)}
         />
         <ArtifactList
           manifest={manifest}

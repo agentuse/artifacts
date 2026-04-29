@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { X } from "lucide-react";
 import type { ProjectRecord } from "../types";
 
 type ProjectSort = "name" | "updated";
@@ -31,7 +30,6 @@ export function Sidebar(props: {
   projects: Record<string, ProjectRecord>;
   selected?: string;
   onSelect: (projectId: string) => void;
-  onClose: () => void;
 }) {
   const [sort, setSortState] = useState<ProjectSort>(() => loadSort());
   const setSort = (next: ProjectSort) => {
@@ -50,18 +48,7 @@ export function Sidebar(props: {
   return (
     <div className="pane">
       <div className="pane-head">
-        <div className="pane-title-row">
-          <h2>Projects</h2>
-          <button
-            className="pane-close-btn"
-            onClick={props.onClose}
-            type="button"
-            aria-label="hide panes"
-            title="hide panes"
-          >
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
+        <h2>Projects</h2>
         <div className="sort-toggle" aria-label="sort projects">
           <button
             className={sort === "name" ? "active" : ""}
