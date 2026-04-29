@@ -195,6 +195,47 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
     return;
   }
 
+  // /api/raw/{artifactId}  -> original file bytes, octet-stream + attachment.
+  // Used by the viewer's Download and Copy actions so they hand back the
+  // exact file the agent wrote (notably: unsanitized HTML, no CSP meta tag).
+  // Safe to expose because the response is `application/octet-stream` with
+  // `Content-Disposition: attachment` — the browser saves it instead of
+  // rendering, so no script execution happens at this origin. In-viewer
+  // rendering still routes through /api/render/:id, which keeps the
+  // sanitizer.
+  const rawMatch = /^\/api\/raw\/([A-Za-z0-9_]+)$/.exec(pathname);
+  if (rawMatch) {
+    const id = rawMatch[1]!;
+    try {
+      const m = readManifest();
+      const rec = m.artifacts[id];
+      if (!rec) {
+        send(res, 404, "not found");
+        return;
+      }
+      const ext = extFromType(rec.type);
+      const file = artifactFilePath(rec.projectId, id, ext);
+      const buf = fs.readFileSync(file);
+      const basename = (rec.name.split("/").pop() || rec.name).replace(
+        /[\r\n"\\]/g,
+        "_",
+      );
+      send(
+        res,
+        200,
+        buf,
+        {
+          "content-type": "application/octet-stream",
+          "content-disposition": `attachment; filename="${basename}"`,
+        },
+        { csp: null },
+      );
+    } catch (e) {
+      send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
   // /api/render/{artifactId}  -> sanitized HTML served as text/html with its
   // own CSP header. Loaded via <iframe src=...> with sandbox="allow-scripts"
   // (no allow-same-origin), so it lives in an opaque origin isolated from the

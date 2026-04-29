@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Menu, X } from "lucide-react";
 import { fetchManifest } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
@@ -162,7 +163,11 @@ export function App() {
         onClick={() => setDrawerOpen(!drawerOpen)}
         aria-label={drawerOpen ? "close menu" : "open menu"}
       >
-        {drawerOpen ? "✕" : "☰"}
+        {drawerOpen ? (
+          <X size={18} strokeWidth={2} />
+        ) : (
+          <Menu size={18} strokeWidth={2} />
+        )}
       </button>
       <div className="drawer">
         <Sidebar
