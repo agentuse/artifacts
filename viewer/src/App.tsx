@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Menu, X } from "lucide-react";
+import { Menu } from "lucide-react";
 import { fetchManifest } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
@@ -13,6 +13,7 @@ interface Route {
   revision?: number;
   expandedId?: string;
   drawerOpen?: boolean;
+  panesHidden?: boolean;
 }
 
 function parseRoute(href: string): Route {
@@ -29,6 +30,7 @@ function parseRoute(href: string): Route {
     if (part === "f" && next) route.expandedId = decodeURIComponent(next);
   }
   if (u.searchParams.get("d") === "1") route.drawerOpen = true;
+  if (u.searchParams.get("panes") === "0") route.panesHidden = true;
   return route;
 }
 
@@ -42,7 +44,11 @@ function navRoute(r: Route, replace = false): void {
     if (r.revision != null) parts.push("v", String(r.revision));
   }
   if (r.expandedId) parts.push("f", encodeURIComponent(r.expandedId));
-  const path = "/" + parts.join("/") + (r.drawerOpen ? "?d=1" : "");
+  const params = new URLSearchParams();
+  if (r.drawerOpen) params.set("d", "1");
+  if (r.panesHidden) params.set("panes", "0");
+  const query = params.toString();
+  const path = "/" + parts.join("/") + (query ? `?${query}` : "");
   const cur = window.location.pathname + window.location.search;
   if (path !== cur) {
     if (replace) window.history.replaceState({}, "", path);
@@ -110,11 +116,12 @@ export function App() {
   }, [manifest, route.projectId, route.artifactName, route.revision]);
 
   const drawerOpen = !!route.drawerOpen;
+  const panesHidden = !!route.panesHidden;
 
   const onSelectProject = (projectId: string) => {
     if (!manifest) return;
     // Land on project home (all latest), not a specific run.
-    const next: Route = { projectId, drawerOpen: route.drawerOpen };
+    const next: Route = { projectId, drawerOpen: route.drawerOpen, panesHidden: route.panesHidden };
     setRoute(next);
     navRoute(next);
   };
@@ -124,6 +131,7 @@ export function App() {
       projectId: route.projectId,
       artifactName,
       drawerOpen: route.drawerOpen,
+      panesHidden: route.panesHidden,
     };
     setRoute(next);
     navRoute(next);
@@ -138,8 +146,13 @@ export function App() {
   };
 
   const setDrawerOpen = (open: boolean) => {
-    // Drawer toggle is transient too.
-    const next: Route = { ...route, drawerOpen: open || undefined };
+    // One menu button controls panes on every screen size. On desktop the
+    // panes are a left overlay; on narrow screens they behave like a drawer.
+    const next: Route = {
+      ...route,
+      drawerOpen: open || undefined,
+      panesHidden: open ? undefined : true,
+    };
     setRoute(next);
     navRoute(next, true);
   };
@@ -149,23 +162,23 @@ export function App() {
   }
 
   return (
-    <div className={"app" + (drawerOpen ? " drawer-open" : "")}>
-      <button
-        className="menu-btn"
-        onClick={() => setDrawerOpen(!drawerOpen)}
-        aria-label={drawerOpen ? "close menu" : "open menu"}
-      >
-        {drawerOpen ? (
-          <X size={18} strokeWidth={2} />
-        ) : (
+    <div className={"app" + (drawerOpen ? " drawer-open" : "") + (panesHidden ? " panes-hidden" : "")}>
+      {panesHidden && (
+        <button
+          className="menu-btn"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="show panes"
+          title="show panes"
+        >
           <Menu size={18} strokeWidth={2} />
-        )}
-      </button>
+        </button>
+      )}
       <div className="drawer">
         <Sidebar
           projects={manifest.projects}
           selected={route.projectId}
           onSelect={onSelectProject}
+          onClose={() => setDrawerOpen(false)}
         />
         <ArtifactList
           manifest={manifest}
@@ -179,6 +192,7 @@ export function App() {
         manifest={manifest}
         artifacts={selectedArtifacts}
         expandedId={route.expandedId ?? null}
+        panesHidden={panesHidden}
         onExpandedChange={onExpandedChange}
       />
     </div>

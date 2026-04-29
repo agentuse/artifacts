@@ -402,10 +402,14 @@ export async function runCli(argv: string[]): Promise<void> {
   project
     .command("list")
     .description("List registered projects")
-    .action(() => {
+    .option("--sort <name|updated>", "sort projects by name or last updated", "name")
+    .action((opts: { sort: string }) => {
       const global = program.opts<GlobalOpts>();
       try {
-        const projects = listRegisteredProjects();
+        if (opts.sort !== "name" && opts.sort !== "updated") {
+          throw new CliError("INVALID_INPUT", "--sort must be 'name' or 'updated'");
+        }
+        const projects = listRegisteredProjects(opts.sort);
         emit(
           global.json,
           { projects: projects.map(([projectId, p]) => ({ projectId, ...p })) },

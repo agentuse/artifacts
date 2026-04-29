@@ -103,13 +103,15 @@ function persistSizes(map: SizeMap): void {
 // touch targets per Apple HIG (and Material's 48dp) plus padding.
 const FLOATING_HEAD_H = 56;
 const FLOATING_HEAD_GAP = 8;
-const FLOATING_HEAD_MIN_W = 320;
+const FLOATING_HEAD_MIN_W = 520;
 const FLOATING_HEAD_MIN_TOP = 8;
+const FLOATING_HEAD_MARGIN = 8;
 
 export function Canvas(props: {
   manifest: Manifest;
   artifacts: Array<[string, ArtifactRecord]>;
   expandedId: string | null;
+  panesHidden?: boolean;
   onExpandedChange: (id: string | null) => void;
 }) {
   const { artifacts, expandedId, onExpandedChange } = props;
@@ -271,25 +273,74 @@ export function Canvas(props: {
     return () => ro.disconnect();
   }, []);
 
-  // Compute the transform that fits the entire content rect into the viewport
-  // (with padding) and centers it. resetTransform is "scale 1, origin (0,0)"
-  // and overflows on most viewports, which isn't what "fit" means.
-  const fitToContent = () => {
-    const r = transformRef.current;
-    const wrap = wrapRef.current;
-    if (!r || !wrap) return;
-    const vw = wrap.clientWidth;
-    const vh = wrap.clientHeight;
-    if (vw <= 0 || vh <= 0) return;
-    const usableW = Math.max(1, vw - FIT_PADDING * 2);
-    const usableH = Math.max(1, vh - FIT_PADDING * 2);
-    const ideal = Math.min(usableW / canvasW, usableH / canvasH);
+  const paneInsetForViewport = (viewportW: number): number => {
+    if (props.panesHidden || viewportW <= 900) return 0;
+    const raw = getComputedStyle(document.documentElement).getPropertyValue("--pane-total-w");
+    const cssPaneW = parseFloat(raw);
+    return Math.min(viewportW, Number.isFinite(cssPaneW) ? cssPaneW : 520);
+  };
+
+  const measuredPaneInset = (wrap: HTMLElement): number => {
+    if (props.panesHidden) return 0;
+    const drawer = document.querySelector<HTMLElement>(".drawer");
+    const drawerRect = drawer?.getBoundingClientRect();
+    if (drawerRect && drawerRect.right > 0) {
+      return Math.max(0, Math.min(wrap.clientWidth, drawerRect.right));
+    }
+    return paneInsetForViewport(wrap.clientWidth);
+  };
+
+  const computeFitTransform = (
+    viewportW: number,
+    viewportH: number,
+    paneInset: number,
+  ): { x: number; y: number; scale: number } => {
+    const openW = Math.max(1, viewportW - paneInset);
+    const openH = Math.max(1, viewportH);
+
+    const contentLeft = tiles.length ? Math.min(...tiles.map((t) => t.x)) : 0;
+    const contentTop = tiles.length ? Math.min(...tiles.map((t) => t.y)) : 0;
+    const contentRight = tiles.length
+      ? Math.max(...tiles.map((t) => t.x + t.w))
+      : canvasW;
+    const contentBottom = tiles.length
+      ? Math.max(...tiles.map((t) => t.y + t.h))
+      : canvasH;
+    const contentW = Math.max(1, contentRight - contentLeft);
+    const contentH = Math.max(1, contentBottom - contentTop);
+
+    const usableW = Math.max(1, openW - FIT_PADDING * 2);
+    const usableH = Math.max(1, openH - FIT_PADDING * 2);
+    const ideal = Math.min(usableW / contentW, usableH / contentH);
     // Don't zoom past 1x for small content (prevents huge upscaling on a
     // single tile); clamp to the wrapper's own scale bounds otherwise.
     const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min(1, ideal)));
-    const px = (vw - canvasW * scale) / 2;
-    const py = (vh - canvasH * scale) / 2;
-    r.setTransform(px, py, scale, 200);
+    return {
+      x: paneInset + FIT_PADDING + (usableW - contentW * scale) / 2 - contentLeft * scale,
+      y: FIT_PADDING + (usableH - contentH * scale) / 2 - contentTop * scale,
+      scale,
+    };
+  };
+
+  const initialFit = computeFitTransform(
+    typeof window !== "undefined" ? window.innerWidth : wrapWidth,
+    typeof window !== "undefined" ? window.innerHeight : 900,
+    paneInsetForViewport(typeof window !== "undefined" ? window.innerWidth : wrapWidth),
+  );
+
+  // Compute the transform that fits the visible artifacts into the currently
+  // open viewport. Panes are overlays, so fitting reserves their overlap but
+  // normal pane hide/show does not participate in canvas layout.
+  const fitToContent = (duration = 200) => {
+    const r = transformRef.current;
+    const wrap = wrapRef.current;
+    if (!r || !wrap) return;
+    const next = computeFitTransform(
+      wrap.clientWidth,
+      wrap.clientHeight,
+      measuredPaneInset(wrap),
+    );
+    r.setTransform(next.x, next.y, next.scale, duration);
   };
 
   // Auto-fit on mount and whenever the content rect changes (artifact count
@@ -379,18 +430,25 @@ export function Canvas(props: {
   const positionFloatingHead = () => {
     const head = floatingHeadRef.current;
     const rect = focusedRectRef.current;
-    if (!head || !rect) return;
+    const wrap = wrapRef.current;
+    if (!head || !rect || !wrap) return;
     const { positionX, positionY, scale } = transformStateRef.current;
     const screenX = positionX + rect.x * scale;
     const screenY = positionY + rect.y * scale;
     const screenW = rect.w * scale;
+    const maxW = Math.max(1, wrap.clientWidth - FLOATING_HEAD_MARGIN * 2);
+    const width = Math.min(maxW, Math.max(FLOATING_HEAD_MIN_W, screenW));
+    const left = Math.min(
+      Math.max(FLOATING_HEAD_MARGIN, screenX),
+      Math.max(FLOATING_HEAD_MARGIN, wrap.clientWidth - width - FLOATING_HEAD_MARGIN),
+    );
     const top = Math.max(
       FLOATING_HEAD_MIN_TOP,
       screenY - FLOATING_HEAD_H - FLOATING_HEAD_GAP,
     );
-    head.style.left = `${screenX}px`;
+    head.style.left = `${left}px`;
     head.style.top = `${top}px`;
-    head.style.width = `${Math.max(FLOATING_HEAD_MIN_W, screenW)}px`;
+    head.style.width = `${width}px`;
   };
 
   // Hybrid grid: dots drawn on the un-transformed canvas-wrap, but their
@@ -511,7 +569,9 @@ export function Canvas(props: {
     <div className="canvas-wrap" ref={wrapRef}>
       <TransformWrapper
         ref={transformRef}
-        initialScale={1}
+        initialScale={initialFit.scale}
+        initialPositionX={initialFit.x}
+        initialPositionY={initialFit.y}
         minScale={MIN_SCALE}
         maxScale={MAX_SCALE}
         // wheelDisabled blocks plain-wheel zoom but still allows ctrlKey wheel
@@ -520,7 +580,10 @@ export function Canvas(props: {
         doubleClick={{ disabled: true }}
         panning={{ velocityDisabled: true, wheelPanning: true }}
         limitToBounds={false}
-        onInit={(r) => updateGrid(r.state)}
+        onInit={(r) => {
+          updateGrid(r.state);
+          requestAnimationFrame(() => fitToContent(0));
+        }}
         onTransformed={(_r, state) => updateGrid(state)}
       >
         {({ zoomIn, zoomOut }) => (
@@ -529,7 +592,7 @@ export function Canvas(props: {
               <button onClick={() => zoomOut()} aria-label="zoom out">
                 <Minus size={16} strokeWidth={2} />
               </button>
-              <button onClick={fitToContent}>fit</button>
+              <button onClick={() => fitToContent()}>fit</button>
               <button onClick={() => zoomIn()} aria-label="zoom in">
                 <Plus size={16} strokeWidth={2} />
               </button>

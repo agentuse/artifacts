@@ -1,4 +1,5 @@
 :root {
+  --pane-total-w: 520px;
   --bg: #fafaf9;
   --fg: #1c1917;
   --muted: #57534e;
@@ -30,16 +31,57 @@ html, body, #root {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
 }
 .app {
-  display: grid;
-  grid-template-columns: 240px 280px 1fr;
+  position: relative;
   height: 100vh;
   overflow: hidden;
 }
-/* In wide layout the drawer is "transparent" — its children become direct
-   grid items so the layout matches the original 3-pane design. */
-.drawer { display: contents; }
-.menu-btn,
+/* Panes overlay the canvas instead of participating in layout, so hiding or
+   showing them doesn't shift the canvas/zoom position. */
+.drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  width: var(--pane-total-w);
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 240px 280px;
+  overflow: hidden;
+  transform: translateX(0);
+  opacity: 1;
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.08);
+  transition:
+    transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
+    opacity 180ms ease;
+}
+.app.panes-hidden .drawer {
+  pointer-events: none;
+  transform: translateX(-100%);
+  opacity: 0;
+}
 .backdrop { display: none; }
+.menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 101;
+  background: var(--tile-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.menu-btn:hover { color: var(--accent); border-color: var(--accent); }
 .pane {
   border-right: 1px solid var(--border);
   background: var(--pane-bg);
@@ -57,6 +99,65 @@ html, body, #root {
   top: 0;
   background: var(--pane-bg);
 }
+.pane-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--pane-bg);
+  border-bottom: 1px solid var(--border);
+}
+.pane-head h2 {
+  position: static;
+  border-bottom: 0;
+  flex: 1;
+}
+.pane-title-row {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.pane-title-row h2 {
+  border-bottom: 0;
+}
+.pane-close-btn {
+  width: 36px;
+  height: 36px;
+  margin-right: 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pane-close-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(127,127,127,0.08);
+}
+.sort-toggle {
+  display: flex;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+.sort-toggle button {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.sort-toggle button:hover { color: var(--accent); border-color: var(--accent); }
+.sort-toggle button.active {
+  color: var(--accent);
+  background: rgba(194,65,12,0.10);
+  border-color: rgba(194,65,12,0.30);
+}
 .list-item {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
@@ -71,6 +172,8 @@ html, body, #root {
 .list-item .secondary { color: var(--muted); font-size: 11px; margin-top: 2px; word-break: break-all; }
 .canvas-wrap {
   position: relative;
+  width: 100%;
+  height: 100vh;
   overflow: hidden;
   background: var(--bg);
   /* Page pinch-zoom is already blocked via the viewport meta. Don't set
@@ -134,7 +237,8 @@ html, body, #root {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .tile { transition: none; }
+  .tile,
+  .drawer { transition: none; }
 }
 /* Icon button: sized to meet Apple HIG's 44×44 minimum touch target so
    it is comfortably tappable on phones / iPad. The visible symbol is a
@@ -496,10 +600,18 @@ html, body, #root {
     background: var(--pane-bg);
     border-right: 1px solid var(--border);
     transform: translateX(-100%);
-    transition: transform 0.22s ease;
+    opacity: 1;
+    transition:
+      transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
+      opacity 180ms ease;
     box-shadow: 0 0 24px rgba(0, 0, 0, 0.18);
   }
   .app.drawer-open .drawer { transform: translateX(0); }
+  .app.panes-hidden .drawer {
+    pointer-events: none;
+    transform: translateX(-100%);
+    opacity: 0;
+  }
   .drawer .pane {
     border-right: none;
     border-bottom: 1px solid var(--border);
@@ -513,29 +625,7 @@ html, body, #root {
     border-bottom: none;
     min-height: 0;
   }
-  .menu-btn {
-    /* Pinned to a 48×48 hit area — HIG-comfortable on phones, large
-       enough to read at arm's length on iPad. */
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    z-index: 101;
-    background: var(--tile-bg);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    min-width: 48px;
-    min-height: 48px;
-    padding: 0;
-    font-size: 22px;
-    line-height: 1;
-    cursor: pointer;
-    color: inherit;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  }
-  .app.drawer-open .backdrop {
+  .app.drawer-open:not(.panes-hidden) .backdrop {
     display: block;
     position: fixed;
     inset: 0;

@@ -66,10 +66,16 @@ function upsertProject(manifest: Manifest, project: ProjectInfo): void {
   };
 }
 
-export function listRegisteredProjects(): Array<[string, ProjectRecord]> {
-  return uniqueProjects(readManifest()).sort((a, b) =>
-    a[1].name.localeCompare(b[1].name),
-  );
+export type ProjectSort = "name" | "updated";
+
+export function listRegisteredProjects(sort: ProjectSort = "name"): Array<[string, ProjectRecord]> {
+  return uniqueProjects(readManifest()).sort((a, b) => {
+    if (sort === "updated") {
+      const byTime = projectTime(b[1]) - projectTime(a[1]);
+      if (byTime !== 0) return byTime;
+    }
+    return a[1].name.localeCompare(b[1].name);
+  });
 }
 
 export async function forgetProject(ref: string): Promise<{ projectId: string; project: ProjectRecord }> {
@@ -98,6 +104,10 @@ export async function pruneMissingProjects(): Promise<Array<{ projectId: string;
     writeManifestAtomic(manifest);
   });
   return removed;
+}
+
+function projectTime(project: ProjectRecord): number {
+  return new Date(project.updatedAt ?? project.createdAt).getTime() || 0;
 }
 
 function uniqueProjects(manifest: Manifest): Array<[string, ProjectRecord]> {

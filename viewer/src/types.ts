@@ -10,6 +10,7 @@ export interface ProjectRecord {
   name: string;
   path: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface RunRecord {
