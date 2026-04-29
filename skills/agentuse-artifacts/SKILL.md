@@ -1,21 +1,26 @@
 ---
 name: agentuse-artifacts
-description: Save substantial markdown/HTML deliverables as project-local, viewable artifacts using @agentuse/artifacts. Each artifact lives in its own subdirectory under ./.agentuse/artifacts/ (e.g. report/index.html, market-analysis/index.md) so related files stay grouped. Use proactively whenever you generate a report, plan, spec, HTML page, dashboard, chart, or rendered document the user will want to preview in a browser. Also triggers on "save as artifact", "preview this", "render this", "make it viewable", "artifact".
+description: Save substantial markdown/HTML deliverables as project-local, viewable artifacts using @agentuse/artifacts. Related outputs from the same task should be grouped into one folder under ./.agentuse/artifacts/ so the viewer canvas shows them together. Use proactively whenever you generate a report, plan, spec, HTML page, dashboard, chart, or rendered document the user will want to preview in a browser. Also triggers on "save as artifact", "preview this", "render this", "make it viewable", "artifact".
 ---
 
 # agentuse-artifacts
 
 Use `@agentuse/artifacts` to save AI-generated deliverables into a project-local artifact directory and preview them in the local viewer.
 
-Primary model: every artifact lives in its own subdirectory under `./.agentuse/artifacts/`, even single-file markdown. This keeps related files grouped together and makes it trivial to add support files later.
+Primary model: create one folder per artifact group under `./.agentuse/artifacts/`. If multiple outputs come from the same task, topic, report, or deliverable package, put them in the same folder so the viewer canvas shows them together. Single standalone outputs can still use their own folder.
 
 ```txt
 <project>/.agentuse/artifacts/
-  report/index.html
-  report/style.css
-  report/chart.png
-  notes/notes.md
-  market-analysis/index.md
+  client-report/
+    summary.md
+    findings.md
+    dashboard.html
+  market-analysis/
+    index.md
+  dashboard/
+    index.html
+    style.css
+    chart.png
 ```
 
 Artifacts are normal project files. Support files work through relative paths.
@@ -25,6 +30,7 @@ Artifacts are normal project files. Support files work through relative paths.
 Use this skill when:
 - You produced a substantial markdown report, plan, spec, analysis, or summary.
 - You generated an HTML page, dashboard, chart, slide, mockup, or rendered document.
+- Multiple generated files belong to the same topic, report, client, analysis, or task.
 - The artifact needs support files like CSS, PNG/JPG/WebP images, fonts, etc.
 - The user said "save this", "preview this", "render this", "make it viewable", or "artifact".
 
@@ -54,21 +60,25 @@ Most commands accept `--json`.
    npx @agentuse/artifacts init
    ```
 
-2. Always write the deliverable inside a subdirectory named after the artifact, never as a bare file at the artifacts root:
+2. Choose the artifact group folder.
+
+   Use one URL-safe folder for everything the user will think of as one package:
 
    ```txt
-   .agentuse/artifacts/<artifact-name>/index.html
+   .agentuse/artifacts/<artifact-group>/
    ```
 
-   or for markdown:
+   Put related files in that same folder instead of creating many sibling folders:
 
    ```txt
-   .agentuse/artifacts/<artifact-name>/index.md
+   .agentuse/artifacts/<artifact-group>/summary.md
+   .agentuse/artifacts/<artifact-group>/details.md
+   .agentuse/artifacts/<artifact-group>/dashboard.html
    ```
 
-   Do this even for single-file artifacts. Grouping by folder keeps related artifacts together and lets you add support files later without restructuring.
+   For a single standalone deliverable, use one folder with an entry file such as `index.md` or `index.html`.
 
-3. Put support files next to the entry file and reference them relatively:
+3. Put support files next to the files that use them and reference them relatively:
 
    ```html
    <link rel="stylesheet" href="./style.css">
@@ -113,7 +123,17 @@ Most commands accept `--json`.
 
 ## Artifact layout conventions
 
-Always use a subdirectory per artifact. Preferred HTML artifact:
+Use one subdirectory per artifact group. Preferred grouped package:
+
+```txt
+.agentuse/artifacts/research-package/
+  summary.md
+  evidence.md
+  recommendations.md
+  dashboard.html
+```
+
+Preferred HTML artifact with support files:
 
 ```txt
 .agentuse/artifacts/customer-report/
@@ -122,16 +142,52 @@ Always use a subdirectory per artifact. Preferred HTML artifact:
   chart.png
 ```
 
-Preferred markdown artifact:
+Preferred standalone markdown artifact:
 
 ```txt
 .agentuse/artifacts/market-analysis/
   index.md
 ```
 
-Directory artifacts are detected when they contain `index.html` or `index.md`. The viewer also detects standalone root files (`*.html`, `*.md`, `*.png`, `*.pdf`, etc.), but do not produce those: a folder with `index.md` is preferred even when there are no support files, so artifacts stay grouped.
+Directory artifacts are detected when they contain supported files such as `index.html`, `index.md`, or other markdown/HTML files. The viewer canvas shows files in the artifact group together, so do not create separate sibling folders for files that belong to the same package.
 
-Use simple, URL-safe artifact folder names, e.g. `market-analysis`, `landing-page`, `qa-report`.
+Name artifact group folders after the user-facing deliverable, not the file type. Use lowercase URL-safe kebab case.
+
+Naming pattern:
+
+```txt
+<scope>-<subject>-<artifact-kind>
+```
+
+Use the shortest name that stays unambiguous:
+
+- `scope`: optional app, package, client, domain, platform, or audience. Include this in monorepos or multi-client work.
+- `subject`: required feature, page, flow, campaign, research topic, client problem, or decision area.
+- `artifact-kind`: optional report, package, mockup, audit, plan, spec, dashboard, or review.
+
+Good names:
+
+```txt
+checkout-redesign
+web-checkout-mockup
+admin-settings-review
+mobile-onboarding-flow
+q2-market-analysis
+customer-support-audit
+pricing-page-cro-report
+```
+
+Avoid vague catch-all names:
+
+```txt
+design-mockup
+report
+notes
+final
+artifact
+```
+
+If related outputs share the same scope and subject, keep them in one folder. If they are different apps, features, clients, or decisions, use separate folders.
 
 ## Examples
 
@@ -163,7 +219,52 @@ Then tell the user:
 
 > Saved to `.agentuse/artifacts/demo/index.html`. View it with `npx @agentuse/artifacts open`.
 
-### Save a markdown report
+### Save a grouped artifact package
+
+```bash
+npx @agentuse/artifacts init
+mkdir -p .agentuse/artifacts/research-package
+cat > .agentuse/artifacts/research-package/summary.md <<'EOF'
+# Summary
+...
+EOF
+cat > .agentuse/artifacts/research-package/recommendations.md <<'EOF'
+# Recommendations
+...
+EOF
+cat > .agentuse/artifacts/research-package/evidence.md <<'EOF'
+# Evidence
+...
+EOF
+npx @agentuse/artifacts list --json
+```
+
+### Save a design or mockup package
+
+```bash
+npx @agentuse/artifacts init
+mkdir -p .agentuse/artifacts/web-checkout-mockup
+cat > .agentuse/artifacts/web-checkout-mockup/index.html <<'EOF'
+<!doctype html>
+<html>
+<head>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>Mockup content...</main>
+</body>
+</html>
+EOF
+cat > .agentuse/artifacts/web-checkout-mockup/notes.md <<'EOF'
+# Design Notes
+...
+EOF
+npx @agentuse/artifacts open
+```
+
+For monorepos, include app/package/platform context in the folder name, such as `web-checkout-mockup`, `ios-onboarding-flow`, or `admin-settings-review`.
+
+### Save a standalone markdown report
 
 ```bash
 npx @agentuse/artifacts init

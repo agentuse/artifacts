@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`@agentuse/artifacts`: a Node CLI plus a local web viewer for collecting markdown/HTML artifacts emitted by AI agents. The CLI ingests files (or stdin) into a content-addressed store under `~/.agentuse/artifacts/`, and the viewer is a single-page React app served from the same CLI process.
+`@agentuse/artifacts`: a Node CLI plus a local web viewer for collecting markdown/HTML artifacts emitted by AI agents. Artifacts live as plain files under each project's `./.agentuse/artifacts/` directory; the CLI registers project paths in a small index at `~/.agentuse/artifacts/manifest.json` and serves the registered projects through a local React SPA.
 
 ## Commands
 
-- `npm run dev -- <args>` runs the CLI via `tsx` against `src/bin.ts`. Example: `npm run dev -- add path/to/file.md`.
+- `npm run dev -- <args>` runs the CLI via `tsx` against `src/bin.ts`. Example: `npm run dev -- list`.
 - `npm run build` builds the viewer first (`viewer/` -> `viewer-dist/`) then compiles the CLI (`src/` -> `dist/`). The viewer must exist before `serve` will start.
 - `npm run build:cli` and `npm run build:viewer` run the two halves independently. Touching only `src/` -> rebuild CLI; touching only `viewer/src/` -> rebuild viewer.
 - `npm run watch` runs both watchers in one shell: `tsx watch` for the server (auto-restart on `src/` changes) and `vite build --watch` for the viewer (incremental rebuild into `viewer-dist/`). Stop any detached server first (`npm run dev -- serve --stop`); otherwise the watcher's server falls back to port 7879 silently. Refresh the browser to pick up viewer rebuilds.
@@ -27,23 +27,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Storage layout (filesystem is the source of truth)
 
-Everything lives under `rootDir()` (default `~/.agentuse/artifacts/`, overridable via `AGENTUSE_ARTIFACTS_HOME`):
+Two layers, both filesystem-backed:
 
-- `manifest.json` - single JSON document holding `projects`, `runs`, `artifacts`, and a `latest` map of `projectId -> name -> artifactId`. Schema versioned (`SCHEMA_VERSION = 1`).
-- `files/<projectId>/<artifactId>.{md,html}` - immutable content blobs.
-- `.lock` - advisory lock file for cross-process manifest writes.
-- `.serve.pid` - JSON record of the running viewer server (pid + port + startedAt).
+1. **Per-project artifacts** live in each registered project at `<project>/.agentuse/artifacts/<name>/index.{md,html}` (with sibling support files). These are normal files the user/agent edits directly; the server scans them on every request.
+2. **Cross-project index** lives under `rootDir()` (default `~/.agentuse/artifacts/`, overridable via `AGENTUSE_ARTIFACTS_HOME`):
+   - `manifest.json` - the project registry: `projects: Record<projectId, { name, path, createdAt, updatedAt? }>`. Schema versioned (`SCHEMA_VERSION = 1`). The runtime `Manifest` type still carries `runs`/`artifacts`/`latest` because `buildLocalManifest()` populates them on every `/api/manifest` response from the on-disk scan; only `projects` is persisted.
+   - `.lock` - advisory lock file for cross-process registry writes.
+   - `.serve.pid` - JSON record of the running viewer server (pid + port + startedAt).
 
-### Manifest concurrency
+### Registry concurrency
 
-All mutations go through `withLock()` in `src/manifest.ts`:
+Project-registry mutations go through `withLock()` in `src/manifest.ts`:
 1. Atomic `open(..., "wx")` on `.lock` with a JSON body (`pid`, `host`, `acquiredAt`).
 2. Stale lock detection: locks older than 60s OR same-host with a dead pid get reclaimed.
 3. Acquisition timeout is 5s; failure throws `LOCK_TIMEOUT` and includes the holder.
 4. SIGINT/SIGTERM release the lock before exit.
-5. Manifest writes use a `tmp` + `rename` pattern with `fsync`.
+5. Writes use a `tmp` + `rename` pattern with `fsync`.
 
-Anything that mutates state (`add`, `revert`, `rm`, `prune`, `fsck`) reads -> mutates in memory -> writes through `withLock`. Reads outside `withLock` are tolerated (manifest writes are atomic).
+Reads outside `withLock` are tolerated (writes are atomic). The only writers today are `init`, `open`, and `project add/forget/prune` — adding/editing artifact files themselves does not touch the lock.
 
 ### Project identity
 
@@ -53,30 +54,24 @@ Anything that mutates state (`add`, `revert`, `rm`, `prune`, `fsck`) reads -> mu
 
 This is why moving a project directory keeps its artifacts; rewriting git history (changing the root commit) creates a new project.
 
-### Runs are tags, not auto-grouping
+### Listing semantics (`src/localArtifacts.ts`)
 
-A "run" is just a string the user supplies via `--run <tag>` or the `AGENTUSE_RUN_ID` env var. Same string = same run; new string = new run record (created lazily). Untagged adds have no `runId`. There is no implicit auto-run.
-
-### Add semantics (`addArtifacts` in `src/artifacts.ts`)
-
-- Sources are read outside the lock (large I/O), then a single `withLock` call ingests the batch. A batch gets at most one `runId`, taken from the first input that supplies one (or the env var).
-- Duplicate detection is by `contentHash` against the latest revision of the same logical name. A duplicate is `{ skipped: true }` and reuses the existing `artifactId` unless `--force-revision`.
-- Revision numbers are per-name, monotonically increasing (`latest.revision + 1`).
-- File write is `tmp` + `fsync` + `rename` into `files/<projectId>/`.
-- Logical name resolution (`resolveLogicalName` in `src/validation.ts`): explicit `--name` wins; else POSIX-style path relative to project root if the source is inside it; else basename. Names are validated against absolute paths, `..` segments, control chars, and a 512-byte cap.
-- Type inference is by extension only: `.md|.markdown` -> markdown, `.html|.htm` -> html. Anything else throws `INVALID_INPUT`.
-
-### Pointer fixups
-
-`rm` and `prune` rewrite `previousArtifactId` chains so deleting a middle revision leaves a connected history. `rm` of the latest falls back to the predecessor in `latest`. `fsck` rebuilds `latest` from scratch by scanning `artifacts` and verifying file existence.
+`listLocalArtifactsForProject()` walks each registered project's `.agentuse/artifacts/` directory:
+- A subdirectory containing `index.html` or `index.md` becomes one artifact named `<dir>`.
+- Sibling `.html`/`.md` files in that subdirectory become additional artifacts named `<dir>/<file>` so multiple artifacts can share supporting assets (css, images) in the same dir.
+- Top-level `.html`/`.md` files are listed as well; non-artifact files at the root are ignored.
+- Each artifact gets a synthetic `artifactId = "local_" + sha256(projectId + "\0" + entry).slice(0, 16)` so the viewer can address it stably across reloads.
+- The synthetic `contentHash` for a directory entry folds in every sibling's `mtimeMs+size` so the viewer's iframe cache-busts when an asset (image, css) referenced via a relative URL is updated, even though the index file itself hasn't changed.
 
 ### Viewer server (`src/server.ts`)
 
-Two shapes of route:
-- `/api/manifest` -> raw manifest JSON.
-- `/api/artifact/:artifactId` -> markdown bytes as `text/markdown`. HTML artifacts are rejected here (400); use `/api/render/:id`.
+Routes:
+- `/api/manifest` -> the live manifest JSON (`buildLocalManifest()` scans every registered project on each call).
+- `/api/artifact/:artifactId` -> markdown / image / pdf bytes for the artifact ID. HTML artifacts are rejected here (400); use `/api/render/:id`.
+- `/api/raw/:artifactId` -> original file bytes as `application/octet-stream` with `Content-Disposition: attachment` (powers Download / Copy actions; never rendered inline).
 - `/api/render/:artifactId` -> sanitized HTML as `text/html` with its own `Content-Security-Policy` and `X-Frame-Options: SAMEORIGIN` response headers. The SPA loads this via `<iframe src="/api/render/:id" sandbox="allow-scripts">`. Going through `src=` (not `srcdoc`) is what lets the artifact have its own CSP — srcdoc inherits the parent SPA CSP, `src=` does not.
-- Everything else falls back to `viewer-dist/index.html` for SPA routes (`/p/:projectId`, `/p/:projectId/r/:runId`, `/p/:projectId/a/:name/v/:rev`, etc.).
+- `/api/project-artifacts/:projectId/:path...` -> serves files inside `<project>/.agentuse/artifacts/` directly so HTML artifacts can resolve relative URLs (css, images) against their own directory. HTML is sanitized; other types pass through with a type-appropriate CSP.
+- Everything else falls back to `viewer-dist/index.html` for SPA routes (`/p/:projectId`, `/p/:projectId/a/:name`, `/p/:projectId/a/:name/f/:expandedId`, etc.).
 
 Server lifecycle:
 - `serve` writes `.serve.pid`. `serve --detach` re-spawns `dist/bin.js serve --port N` with `detached: true` and `stdio: "ignore"`, then polls `.serve.pid` for up to 5s. `serve --stop` SIGTERMs and cleans up.
@@ -106,7 +101,7 @@ When modifying sanitization: do not switch to regex; do not relax `connect-src` 
 
 ### Viewer SPA (`viewer/src/`)
 
-- React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `navRoute` over `window.location` in `App.tsx`. Path shape: `/p/:projectId[/r/:runId | /a/:name[/v/:rev]][/f/:expandedId]?d=1`.
+- React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `navRoute` over `window.location` in `App.tsx`. Path shape: `/p/:projectId[/a/:name[/v/:rev]][/f/:expandedId]?d=1`. The `r/:runId` and `v/:rev` segments still parse for backward-compat with bookmarked URLs, but local-fs artifacts always have one revision and no run tag.
 - Manifest is polled every 2s from `/api/manifest`. There is no websocket or SSE.
 - HTML artifacts render via `<iframe src="/api/render/:id" sandbox="allow-scripts">`. Markdown is fetched from `/api/artifact/:id` and rendered with `react-markdown` + `remark-gfm` + `rehype-highlight`.
 - `react-zoom-pan-pinch` powers the canvas pan/zoom. If you touch gestures here, mind the conflict between iframe scrolling and the parent pan handler.
@@ -116,5 +111,5 @@ When modifying sanitization: do not switch to regex; do not relax `connect-src` 
 - TypeScript: `strict` + `noUncheckedIndexedAccess`. Indexed access into `manifest.artifacts[id]` returns `T | undefined`; respect this rather than `!`-asserting blindly. `latest[projectId]` is the same.
 - ESM throughout. Imports use `.js` extensions even for `.ts` source (NodeNext-style for `Bundler` resolution).
 - Never call `process.exit` outside `cli.ts`'s `fail()` / commander callbacks. Library code throws `CliError`.
-- All filesystem writes that need durability go `tmp + fsync + rename`. Don't introduce direct `writeFileSync` for manifest or artifact blobs.
+- Registry writes go `tmp + fsync + rename` through `writeManifestAtomic`. Artifact files themselves are owned by the user/agent and the CLI does not write to them.
 - When adding a CLI flag, also add a JSON-output shape to the corresponding `emit()` call so `--json` consumers see it.
