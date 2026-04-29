@@ -1,26 +1,5 @@
-import { useState } from "react";
 import type { ProjectRecord } from "../types";
-
-type ProjectSort = "name" | "updated";
-
-const SORT_KEY = "agentuse-artifacts.project-sort.v1";
-
-function loadSort(): ProjectSort {
-  try {
-    const raw = localStorage.getItem(SORT_KEY);
-    return raw === "updated" ? "updated" : "name";
-  } catch {
-    return "name";
-  }
-}
-
-function saveSort(sort: ProjectSort): void {
-  try {
-    localStorage.setItem(SORT_KEY, sort);
-  } catch {
-    // ignore private mode / quota failures
-  }
-}
+import type { SortMode } from "../sort";
 
 function projectTime(p: ProjectRecord): number {
   return new Date(p.updatedAt ?? p.createdAt).getTime() || 0;
@@ -29,16 +8,11 @@ function projectTime(p: ProjectRecord): number {
 export function Sidebar(props: {
   projects: Record<string, ProjectRecord>;
   selected?: string;
+  sort: SortMode;
   onSelect: (projectId: string) => void;
 }) {
-  const [sort, setSortState] = useState<ProjectSort>(() => loadSort());
-  const setSort = (next: ProjectSort) => {
-    setSortState(next);
-    saveSort(next);
-  };
-
   const entries = Object.entries(props.projects).sort((a, b) => {
-    if (sort === "updated") {
+    if (props.sort === "updated") {
       const byTime = projectTime(b[1]) - projectTime(a[1]);
       if (byTime !== 0) return byTime;
     }
@@ -47,25 +21,7 @@ export function Sidebar(props: {
 
   return (
     <div className="pane">
-      <div className="pane-head">
-        <h2>Projects</h2>
-        <div className="sort-toggle" aria-label="sort projects">
-          <button
-            className={sort === "name" ? "active" : ""}
-            onClick={() => setSort("name")}
-            type="button"
-          >
-            Name
-          </button>
-          <button
-            className={sort === "updated" ? "active" : ""}
-            onClick={() => setSort("updated")}
-            type="button"
-          >
-            Updated
-          </button>
-        </div>
-      </div>
+      <h2>Projects</h2>
       {entries.length === 0 && <div className="list-item secondary">no projects yet</div>}
       {entries.map(([id, p]) => (
         <div

@@ -88,6 +88,7 @@ html, body, #root {
   min-width: 0;
   display: grid;
   grid-template-columns: 240px 280px;
+  grid-template-rows: auto 1fr;
   overflow: hidden;
   transform: translateX(0);
   opacity: 1;
@@ -95,6 +96,23 @@ html, body, #root {
   transition:
     transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
     opacity 180ms ease;
+}
+
+/* Shared sort row across both panes. The floating menu/close button sits at
+   top:12 left:12 (32×32) and overlays this row, so we leave a 56px left
+   inset to keep the toggle clear of it. */
+.drawer-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 16px 12px 56px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--border);
+  background: var(--pane-bg);
+}
+.drawer-head .sort-toggle {
+  padding: 0;
 }
 .app.panes-hidden .drawer {
   pointer-events: none;
@@ -154,21 +172,6 @@ html, body, #root {
   top: 0;
   background: var(--pane-bg);
 }
-/* The floating menu/close toggle sits at top:12 left:12 (32×32, so its
-   bottom edge is y=44). Pad the leftmost pane's title so "› PROJECTS"
-   sits to the right of the toggle, and push the sort row well below the
-   toggle so the NAME/UPDATED chips have breathing room beneath it. */
-.drawer .pane:first-child .pane-head h2 {
-  padding-left: 52px;
-  display: flex;
-  align-items: center;
-  min-height: 56px;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-.drawer .pane:first-child .sort-toggle {
-  padding-top: 8px;
-}
 /* Subtle phosphor cue: a green caret before the label. */
 .pane h2::before {
   content: "› ";
@@ -176,23 +179,9 @@ html, body, #root {
   margin-right: 2px;
 }
 
-.pane-head {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--pane-bg);
-  border-bottom: 1px solid var(--border);
-}
-.pane-head h2 {
-  position: static;
-  border-bottom: 0;
-  flex: 1;
-}
-
 .sort-toggle {
   display: flex;
   gap: 6px;
-  padding: 0 12px 12px;
 }
 .sort-toggle button {
   flex: 1;

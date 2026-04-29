@@ -3,8 +3,9 @@ import { Menu, X } from "lucide-react";
 import { fetchManifest } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
-import { ArtifactList, groupKeyOf } from "./components/ArtifactList";
+import { ArtifactList, groupKeyOf, latestGroupFor } from "./components/ArtifactList";
 import { Canvas } from "./components/Canvas";
+import { loadSort, saveSort, type SortMode } from "./sort";
 
 interface Route {
   projectId?: string;
@@ -63,6 +64,11 @@ function navRoute(r: Route, replace = false): void {
 export function App() {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.href));
+  const [sort, setSortState] = useState<SortMode>(() => loadSort());
+  const setSort = (next: SortMode) => {
+    setSortState(next);
+    saveSort(next);
+  };
 
   // Initial fetch + 2s polling per spec.
   useEffect(() => {
@@ -89,15 +95,16 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  // Default selection on first manifest load: just the project. Run is now
-  // an optional filter, not the primary lens, so we land on "all latest
-  // artifacts" (project home) rather than auto-picking a run.
+  // Default selection on first manifest load: pick a project and land on
+  // its most-recently-updated folder so the user sees fresh work without an
+  // extra click. Falls back to "All" when the project has no folders.
   useEffect(() => {
     if (!manifest || route.projectId) return;
     const projectIds = Object.keys(manifest.projects);
     const first = projectIds[0];
     if (first) {
-      const next: Route = { projectId: first };
+      const group = latestGroupFor(manifest, first);
+      const next: Route = { projectId: first, group };
       setRoute(next);
       navRoute(next);
     }
@@ -128,8 +135,16 @@ export function App() {
 
   const onSelectProject = (projectId: string) => {
     if (!manifest) return;
-    // Land on project home (all latest), not a specific run.
-    const next: Route = { projectId, drawerOpen: route.drawerOpen, panesHidden: route.panesHidden };
+    // Auto-select the most-recently-updated folder for the new project so
+    // the user lands on fresh work. If there are no folders, fall back to
+    // "All".
+    const group = latestGroupFor(manifest, projectId);
+    const next: Route = {
+      projectId,
+      group,
+      drawerOpen: route.drawerOpen,
+      panesHidden: route.panesHidden,
+    };
     setRoute(next);
     navRoute(next);
   };
@@ -191,9 +206,28 @@ export function App() {
         {panesHidden ? <Menu size={16} strokeWidth={1.75} /> : <X size={14} strokeWidth={1.5} />}
       </button>
       <div className="drawer">
+        <div className="drawer-head">
+          <div className="sort-toggle" aria-label="sort projects and artifacts">
+            <button
+              className={sort === "name" ? "active" : ""}
+              onClick={() => setSort("name")}
+              type="button"
+            >
+              Name
+            </button>
+            <button
+              className={sort === "updated" ? "active" : ""}
+              onClick={() => setSort("updated")}
+              type="button"
+            >
+              Updated
+            </button>
+          </div>
+        </div>
         <Sidebar
           projects={manifest.projects}
           selected={route.projectId}
+          sort={sort}
           onSelect={onSelectProject}
         />
         <ArtifactList
@@ -201,6 +235,7 @@ export function App() {
           projectId={route.projectId}
           selected={route.artifactName}
           selectedGroup={route.group}
+          sort={sort}
           onSelect={onSelectArtifact}
           onSelectGroup={onSelectGroup}
         />
