@@ -279,6 +279,7 @@ function makeLocalArtifact(
     createdAt: stat.mtime.toISOString(),
     local: true,
     localEntry: entry,
+    absolutePath: absPath,
   };
   if (type === "png" || type === "jpg" || type === "webp") {
     try {

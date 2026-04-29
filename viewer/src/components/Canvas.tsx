@@ -8,12 +8,14 @@ import {
   Check,
   Copy,
   Download,
+  FileText,
   Maximize2,
   Minus,
+  MoreHorizontal,
   Plus,
   X,
 } from "lucide-react";
-import type { ArtifactRecord, ArtifactType } from "../types";
+import type { ArtifactRecord } from "../types";
 import { Tile } from "./Tile";
 
 const TILE_W = 720;
@@ -624,11 +626,7 @@ export function Canvas(props: {
         >
           <span className="name">{focusedRec.name}</span>
           <RelativeTime iso={focusedRec.createdAt} />
-          <TileActions
-            artifactId={focusedId}
-            type={focusedRec.type}
-            name={focusedRec.name}
-          />
+          <TileActions artifactId={focusedId} record={focusedRec} />
           <button
             className="icon-btn"
             onClick={() => onExpandedChange(focusedId)}
@@ -730,11 +728,7 @@ function TileWrapper(props: TileWrapperProps) {
         <div className="tile-head">
           <span className="name">{props.record.localEntry ?? props.record.name}</span>
           <RelativeTime iso={props.record.createdAt} />
-          <TileActions
-            artifactId={props.artifactId}
-            type={props.record.type}
-            name={props.record.name}
-          />
+          <TileActions artifactId={props.artifactId} record={props.record} />
           {props.expanded ? (
             <button
               className="icon-btn"
@@ -781,56 +775,131 @@ function TileWrapper(props: TileWrapperProps) {
   );
 }
 
-// Both Download and Copy go through /api/raw/:id so they return the exact
-// file the agent wrote — notably the original (unsanitized) HTML rather
-// than what the viewer iframe sees. /api/render/:id stays the rendering
-// path; /api/raw/:id is for "give me the file."
-function TileActions(props: {
-  artifactId: string;
-  type: ArtifactType;
-  name: string;
-}) {
-  const [copied, setCopied] = useState(false);
+// "..." menu collapsing the per-tile actions (download, copy raw content,
+// copy on-disk path). Download and "copy content" go through /api/raw/:id so
+// they return the exact file the agent wrote — notably the original
+// (unsanitized) HTML rather than what the viewer iframe sees.
+// /api/render/:id stays the rendering path; /api/raw/:id is for "give me
+// the file." "Copy path" copies record.absolutePath as plain text.
+type CopyState = null | "path" | "content";
+
+function TileActions(props: { artifactId: string; record: ArtifactRecord }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<CopyState>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const rawUrl = `/api/raw/${props.artifactId}`;
-  const filename = props.name.split("/").pop() || props.name;
-  const isText = props.type === "markdown" || props.type === "html";
-  const onCopy = async () => {
+  const filename =
+    props.record.name.split("/").pop() || props.record.name;
+  const isText =
+    props.record.type === "markdown" || props.record.type === "html";
+  const absolutePath = props.record.absolutePath;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (t && rootRef.current && rootRef.current.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const flashCopied = (which: Exclude<CopyState, null>) => {
+    setCopied(which);
+    setTimeout(() => setCopied((v) => (v === which ? null : v)), 1200);
+  };
+
+  const onCopyPath = async () => {
+    if (!absolutePath) return;
+    try {
+      await navigator.clipboard.writeText(absolutePath);
+      flashCopied("path");
+      setOpen(false);
+    } catch {
+      // Clipboard blocked (insecure context, permission denied) — leave UI alone.
+    }
+  };
+
+  const onCopyContent = async () => {
     try {
       const res = await fetch(rawUrl, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       const text = await res.text();
       await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+      flashCopied("content");
+      setOpen(false);
     } catch {
-      // Clipboard / fetch failed — leave UI unchanged. No toast system here.
+      // ignore — no toast system in this viewer
     }
   };
+
   return (
-    <>
-      <a
+    <div className="action-menu" ref={rootRef}>
+      <button
         className="icon-btn"
-        href={rawUrl}
-        download={filename}
-        aria-label="download"
-        title={`download ${filename}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-label="more actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="more actions"
       >
-        <Download size={16} strokeWidth={2} />
-      </a>
-      {isText && (
-        <button
-          className="icon-btn"
-          onClick={onCopy}
-          aria-label={copied ? "copied" : "copy"}
-          title="copy to clipboard"
-        >
-          {copied ? (
-            <Check size={16} strokeWidth={2} />
-          ) : (
-            <Copy size={16} strokeWidth={2} />
+        {copied ? (
+          <Check size={16} strokeWidth={2} />
+        ) : (
+          <MoreHorizontal size={16} strokeWidth={2} />
+        )}
+      </button>
+      {open && (
+        <div className="action-menu-panel" role="menu">
+          {absolutePath && (
+            <button
+              role="menuitem"
+              className="action-menu-item"
+              onClick={onCopyPath}
+              title={absolutePath}
+            >
+              {copied === "path" ? (
+                <Check size={14} strokeWidth={2} />
+              ) : (
+                <FileText size={14} strokeWidth={2} />
+              )}
+              <span>Copy path</span>
+            </button>
           )}
-        </button>
+          {isText && (
+            <button
+              role="menuitem"
+              className="action-menu-item"
+              onClick={onCopyContent}
+            >
+              {copied === "content" ? (
+                <Check size={14} strokeWidth={2} />
+              ) : (
+                <Copy size={14} strokeWidth={2} />
+              )}
+              <span>Copy content</span>
+            </button>
+          )}
+          <a
+            role="menuitem"
+            className="action-menu-item"
+            href={rawUrl}
+            download={filename}
+            onClick={() => setOpen(false)}
+          >
+            <Download size={14} strokeWidth={2} />
+            <span>Download</span>
+          </a>
+        </div>
       )}
-    </>
+    </div>
   );
 }

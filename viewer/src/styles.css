@@ -384,6 +384,57 @@ html, body, #root {
 }
 .icon-btn:active { background: var(--pane-bg-elev); }
 
+/* "..." action menu hosted inside .tile-head / .tile-head-floating. The
+   wrapper is position: relative so the floating panel can anchor to the
+   trigger button. The panel is position: absolute with z-index above the
+   tile body but below modal overlays. */
+.action-menu {
+  position: relative;
+  display: inline-flex;
+}
+.action-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: var(--pane-bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-float);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 60;
+}
+.action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  min-height: 36px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+.action-menu-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.action-menu-item svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.action-menu-item:hover svg { color: var(--accent); }
+
 .tile-head {
   display: flex;
   align-items: center;

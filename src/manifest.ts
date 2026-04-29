@@ -36,9 +36,14 @@ export interface ArtifactRecord {
   naturalWidth?: number;
   naturalHeight?: number;
   /** Project-local live artifact fields. localEntry is the path under
-   *  <project>/.agentuse/artifacts/ (POSIX separators). */
+   *  <project>/.agentuse/artifacts/ (POSIX separators). absolutePath is the
+   *  resolved on-disk path for the artifact's primary file (host-native
+   *  separators) so the viewer can offer "copy path" without reconstructing
+   *  it client-side. Only set for local artifacts; never persisted into the
+   *  on-disk manifest (buildLocalManifest fills it on every read). */
   local?: boolean;
   localEntry?: string;
+  absolutePath?: string;
 }
 
 export interface Manifest {
