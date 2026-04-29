@@ -13,17 +13,6 @@ export function manifestPath(): string {
 export function lockPath(): string {
   return path.join(rootDir(), ".lock");
 }
-export function filesDir(): string {
-  return path.join(rootDir(), "files");
-}
 export function servePidPath(): string {
   return path.join(rootDir(), ".serve.pid");
-}
-
-export function projectFilesDir(projectId: string): string {
-  return path.join(filesDir(), projectId);
-}
-
-export function artifactFilePath(projectId: string, artifactId: string, ext: string): string {
-  return path.join(projectFilesDir(projectId), `${artifactId}.${ext}`);
 }

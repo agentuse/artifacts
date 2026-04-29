@@ -4,9 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { CliError } from "./errors.js";
-import { rootDir, servePidPath, artifactFilePath } from "./paths.js";
-import { readManifest } from "./manifest.js";
-import { extFromType } from "./validation.js";
+import { rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import {
   buildLocalManifest,
@@ -165,19 +163,16 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
     const id = artMatch[1]!;
     try {
       const local = findLocalArtifactById(id);
-      const m = local ? undefined : readManifest();
-      const rec = local?.record ?? m?.artifacts[id];
-      if (!rec) {
+      if (!local) {
         send(res, 404, "not found");
         return;
       }
+      const rec = local.record;
       if (rec.type === "html") {
         send(res, 400, "use /api/render/:id for HTML artifacts");
         return;
       }
-      const ext = extFromType(rec.type);
-      const file = local?.absPath ?? artifactFilePath(rec.projectId, id, ext);
-      const buf = fs.readFileSync(file);
+      const buf = fs.readFileSync(local.absPath);
       if (rec.type === "markdown") {
         send(res, 200, buf, { "content-type": "text/markdown; charset=utf-8" });
         return;
@@ -219,15 +214,12 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
     const id = rawMatch[1]!;
     try {
       const local = findLocalArtifactById(id);
-      const m = local ? undefined : readManifest();
-      const rec = local?.record ?? m?.artifacts[id];
-      if (!rec) {
+      if (!local) {
         send(res, 404, "not found");
         return;
       }
-      const ext = extFromType(rec.type);
-      const file = local?.absPath ?? artifactFilePath(rec.projectId, id, ext);
-      const buf = fs.readFileSync(file);
+      const rec = local.record;
+      const buf = fs.readFileSync(local.absPath);
       const basename = (rec.name.split("/").pop() || rec.name).replace(
         /[\r\n"\\]/g,
         "_",
@@ -307,18 +299,15 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
     const id = renderMatch[1]!;
     try {
       const local = findLocalArtifactById(id);
-      const m = local ? undefined : readManifest();
-      const rec = local?.record ?? m?.artifacts[id];
-      if (!rec) {
+      if (!local) {
         send(res, 404, "not found");
         return;
       }
-      if (rec.type !== "html") {
+      if (local.record.type !== "html") {
         send(res, 400, "not an html artifact");
         return;
       }
-      const file = local?.absPath ?? artifactFilePath(rec.projectId, id, extFromType(rec.type));
-      const buf = fs.readFileSync(file);
+      const buf = fs.readFileSync(local.absPath);
       const safe = buildSafeSrcdoc(buf.toString("utf8"));
       send(res, 200, safe, {
         "content-type": "text/html; charset=utf-8",

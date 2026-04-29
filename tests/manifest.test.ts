@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import { tempStorageRoot, rmStorageRoot } from "./helpers";
 import {
-  ensureProject,
   readManifest,
   withLock,
   writeManifestAtomic,
@@ -25,10 +24,14 @@ describe("manifest read/write/lock", () => {
     expect(m.projects).toEqual({});
   });
 
-  it("round-trips ensureProject + write", async () => {
+  it("round-trips a project write", async () => {
     await withLock(async () => {
       const m = readManifest();
-      ensureProject(m, { projectId: "proj_a", name: "A", path: "/tmp/a" });
+      m.projects.proj_a = {
+        name: "A",
+        path: "/tmp/a",
+        createdAt: new Date().toISOString(),
+      };
       writeManifestAtomic(m);
     });
     const reread = readManifest();

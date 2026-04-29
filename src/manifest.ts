@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import { CliError } from "./errors.js";
 import { lockPath, manifestPath, rootDir } from "./paths.js";
 
@@ -20,8 +19,9 @@ export interface RunRecord {
 
 export interface ArtifactRecord {
   projectId: string;
-  /** Optional run tag. Present only when the caller explicitly grouped this
-   *  artifact via `--run <tag>` or the `AGENTUSE_RUN_ID` env var. */
+  /** Legacy field retained on the wire shape so the viewer's RunList
+   *  panel keeps deserializing existing payloads. Local artifacts never
+   *  populate it. */
   runId?: string;
   name: string;
   type: "markdown" | "html" | "png" | "jpg" | "webp" | "pdf";
@@ -95,7 +95,7 @@ export function readManifest(): Manifest {
   if (m.schemaVersion !== SCHEMA_VERSION) {
     throw new CliError(
       "CORRUPT_MANIFEST",
-      `manifest schemaVersion ${m.schemaVersion} != ${SCHEMA_VERSION}; run 'artifacts migrate'`,
+      `manifest schemaVersion ${m.schemaVersion} != ${SCHEMA_VERSION}`,
     );
   }
   // Defensive defaults for forward-compat reads.
@@ -217,20 +217,3 @@ export async function withLock<T>(fn: () => Promise<T> | T): Promise<T> {
   }
 }
 
-export function ensureProject(
-  manifest: Manifest,
-  project: { projectId: string; name: string; path: string },
-): void {
-  const existing = manifest.projects[project.projectId];
-  if (existing) {
-    // Keep most recent path as a reattach hint.
-    existing.path = project.path;
-    return;
-  }
-  manifest.projects[project.projectId] = {
-    name: project.name,
-    path: project.path,
-    createdAt: new Date().toISOString(),
-  };
-  manifest.latest[project.projectId] ??= {};
-}
