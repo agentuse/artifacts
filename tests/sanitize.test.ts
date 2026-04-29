@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSafeSrcdoc, scrubHtml, META_CSP } from "../src/sanitize";
+import { buildSafeSrcdoc, scrubHtml, META_CSP, ARTIFACT_RUNTIME_SHIM } from "../src/sanitize";
 
 describe("scrubHtml", () => {
   it("strips meta http-equiv=refresh", () => {
@@ -65,10 +65,14 @@ describe("scrubHtml", () => {
 });
 
 describe("buildSafeSrcdoc", () => {
-  it("injects meta-CSP into <head>", () => {
+  it("injects meta-CSP and artifact runtime shim into <head>", () => {
     const out = buildSafeSrcdoc(`<html><head><title>t</title></head><body>x</body></html>`);
     expect(out).toContain(`http-equiv="Content-Security-Policy"`);
     expect(out).toContain(META_CSP);
+    expect(out).toContain(ARTIFACT_RUNTIME_SHIM);
+    expect(out.indexOf(`http-equiv="Content-Security-Policy"`)).toBeLessThan(
+      out.indexOf(ARTIFACT_RUNTIME_SHIM),
+    );
   });
 
   it("creates <head> if missing", () => {
@@ -79,7 +83,15 @@ describe("buildSafeSrcdoc", () => {
   it("wraps fragments", () => {
     const out = buildSafeSrcdoc(`<p>hi</p>`);
     expect(out).toContain(META_CSP);
+    expect(out).toContain(ARTIFACT_RUNTIME_SHIM);
     expect(out).toContain("<p>hi</p>");
+  });
+
+  it("runtime shim covers sandbox-hostile storage and clipboard APIs", () => {
+    expect(ARTIFACT_RUNTIME_SHIM).toContain(`installStorageShim("localStorage")`);
+    expect(ARTIFACT_RUNTIME_SHIM).toContain(`installStorageShim("sessionStorage")`);
+    expect(ARTIFACT_RUNTIME_SHIM).toContain("writeText");
+    expect(ARTIFACT_RUNTIME_SHIM).toContain("execCommand");
   });
 
   it("scrubs and CSP-injects in one pass", () => {

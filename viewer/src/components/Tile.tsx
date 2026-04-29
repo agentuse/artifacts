@@ -39,13 +39,14 @@ function isExternalHref(href: string | undefined): boolean {
 export function Tile(props: { artifactId: string; record: ArtifactRecord }) {
   const url = artifactUrl(props.artifactId, props.record);
   if (props.record.type === "html") {
-    // The iframe loads /api/render/:id directly. The server attaches CSP
-    // there; sandbox="allow-scripts" (no allow-same-origin) keeps the iframe
+    // The iframe loads sanitized HTML. The server attaches CSP and injects a
+    // clipboard writeText shim; sandbox (no allow-same-origin) keeps the iframe
     // in an opaque origin so its scripts cannot reach the parent viewer.
     return (
       <div className="tile-body html">
         <iframe
           sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+          allow="clipboard-write"
           src={props.record.local ? url : `/api/render/${props.artifactId}`}
           title="artifact"
         />

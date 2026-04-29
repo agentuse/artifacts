@@ -24,6 +24,134 @@ export const META_CSP =
   "object-src 'none'; " +
   "base-uri 'none'";
 
+// HTML artifacts run in a sandboxed iframe without allow-same-origin. That is
+// the security boundary, but it also means browser APIs tied to origin/storage
+// can be missing or throw SecurityError. Install small same-document shims
+// before artifact scripts run:
+// - localStorage/sessionStorage become in-memory stores when the browser denies
+//   real storage for the sandbox's opaque origin. This prevents one storage read
+//   from aborting the whole artifact script before event handlers are attached.
+// - navigator.clipboard.writeText uses the legacy copy command synchronously, so
+//   artifact buttons keep working during the user's click.
+export const ARTIFACT_RUNTIME_SHIM = `<script>
+(() => {
+  const createMemoryStorage = () => {
+    const store = new Map();
+    return {
+      get length() { return store.size; },
+      clear() { store.clear(); },
+      getItem(key) {
+        key = String(key);
+        return store.has(key) ? store.get(key) : null;
+      },
+      key(index) { return Array.from(store.keys())[Number(index)] ?? null; },
+      removeItem(key) { store.delete(String(key)); },
+      setItem(key, value) { store.set(String(key), String(value)); },
+    };
+  };
+
+  const installStorageShim = (name) => {
+    try {
+      const storage = window[name];
+      const testKey = "__agentuse_artifacts_storage_test__";
+      storage.setItem(testKey, testKey);
+      storage.removeItem(testKey);
+    } catch {
+      const memoryStorage = createMemoryStorage();
+      try {
+        Object.defineProperty(window, name, {
+          configurable: true,
+          enumerable: true,
+          get: () => memoryStorage,
+        });
+      } catch {}
+    }
+  };
+
+  installStorageShim("localStorage");
+  installStorageShim("sessionStorage");
+
+  const copyViaExecCommand = (text) => new Promise((resolve, reject) => {
+    const doc = document;
+    const root = doc.body || doc.documentElement;
+    if (!root || typeof doc.execCommand !== "function") {
+      reject(new Error("clipboard copy is not available"));
+      return;
+    }
+
+    const active = doc.activeElement;
+    const selection = typeof doc.getSelection === "function" ? doc.getSelection() : null;
+    const ranges = [];
+    if (selection) {
+      for (let i = 0; i < selection.rangeCount; i += 1) ranges.push(selection.getRangeAt(i));
+    }
+
+    const textarea = doc.createElement("textarea");
+    textarea.value = String(text ?? "");
+    textarea.setAttribute("readonly", "");
+    textarea.setAttribute("aria-hidden", "true");
+    textarea.style.position = "fixed";
+    textarea.style.top = "0";
+    textarea.style.left = "-9999px";
+    textarea.style.width = "1px";
+    textarea.style.height = "1px";
+    textarea.style.opacity = "0";
+
+    const cleanup = () => {
+      textarea.remove();
+      if (selection) {
+        selection.removeAllRanges();
+        for (const range of ranges) selection.addRange(range);
+      }
+      if (active && typeof active.focus === "function") {
+        try { active.focus({ preventScroll: true }); } catch { active.focus(); }
+      }
+    };
+
+    root.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+
+    let ok = false;
+    try {
+      ok = doc.execCommand("copy");
+    } catch (error) {
+      cleanup();
+      reject(error);
+      return;
+    }
+    cleanup();
+    if (ok) {
+      resolve();
+    } else {
+      reject(new Error("clipboard copy was denied"));
+    }
+  });
+
+  const nativeClipboard = navigator.clipboard;
+  const clipboard = nativeClipboard
+    ? new Proxy(nativeClipboard, {
+        get(target, prop) {
+          if (prop === "writeText") return copyViaExecCommand;
+          const value = target[prop];
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      })
+    : { writeText: copyViaExecCommand };
+
+  try {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      enumerable: true,
+      get: () => clipboard,
+    });
+  } catch {
+    try { navigator.clipboard.writeText = copyViaExecCommand; } catch {}
+  }
+})();
+</script>`;
+
 const PRELOAD_REL = new Set(["preload", "prefetch", "dns-prefetch", "preconnect", "modulepreload"]);
 
 /**
@@ -97,6 +225,7 @@ function shouldRemove(tag: string, el: HTMLElement): boolean {
 export function buildSafeSrcdoc(input: string): string {
   const scrubbed = scrubHtml(input);
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${META_CSP}">`;
+  const headInjection = cspMeta + ARTIFACT_RUNTIME_SHIM;
 
   // If the document has a <head>, inject as the first child of head; otherwise
   // prepend a synthetic <head>.
@@ -104,7 +233,7 @@ export function buildSafeSrcdoc(input: string): string {
   const headIdx = lower.indexOf("<head>");
   if (headIdx >= 0) {
     const insertAt = headIdx + "<head>".length;
-    return scrubbed.slice(0, insertAt) + cspMeta + scrubbed.slice(insertAt);
+    return scrubbed.slice(0, insertAt) + headInjection + scrubbed.slice(insertAt);
   }
   const htmlIdx = lower.indexOf("<html");
   if (htmlIdx >= 0) {
@@ -112,10 +241,10 @@ export function buildSafeSrcdoc(input: string): string {
     if (closeBracket > 0) {
       return (
         scrubbed.slice(0, closeBracket + 1) +
-        `<head>${cspMeta}</head>` +
+        `<head>${headInjection}</head>` +
         scrubbed.slice(closeBracket + 1)
       );
     }
   }
-  return `<!DOCTYPE html><html><head>${cspMeta}</head><body>${scrubbed}</body></html>`;
+  return `<!DOCTYPE html><html><head>${headInjection}</head><body>${scrubbed}</body></html>`;
 }
