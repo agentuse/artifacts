@@ -4,6 +4,27 @@
   "description": "CLI + viewer for collecting artifacts emitted by AI agents",
   "type": "module",
   "license": "MIT",
+  "author": "Leon Ho",
+  "homepage": "https://github.com/agentuse/artifacts#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentuse/artifacts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/agentuse/artifacts/issues"
+  },
+  "keywords": [
+    "agent",
+    "artifacts",
+    "cli",
+    "viewer",
+    "markdown",
+    "ai",
+    "agentuse"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "artifacts": "dist/bin.js"
   },
@@ -23,7 +44,9 @@
     "dev:server": "tsx watch src/bin.ts serve",
     "dev:viewer": "cd viewer && npm run dev",
     "watch:viewer": "cd viewer && vite build --watch --outDir ../viewer-dist --emptyOutDir",
-    "watch": "concurrently -n server,viewer -c cyan,yellow \"npm:dev:server\" \"npm:watch:viewer\""
+    "watch": "concurrently -n server,viewer -c cyan,yellow \"npm:dev:server\" \"npm:watch:viewer\"",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "release:dry": "npm publish --dry-run"
   },
   "engines": {
     "node": ">=20"
