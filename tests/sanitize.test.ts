@@ -36,6 +36,32 @@ describe("scrubHtml", () => {
     const out = scrubHtml(`<link rel="stylesheet preload" href="x">`);
     expect(out).not.toContain("<link");
   });
+
+  it("retargets external <a href> to open in a new tab", () => {
+    const out = scrubHtml(`<a href="https://example.com/page">x</a>`);
+    expect(out).toContain(`target="_blank"`);
+    expect(out).toMatch(/rel="[^"]*\bnoopener\b[^"]*"/);
+    expect(out).toMatch(/rel="[^"]*\bnoreferrer\b[^"]*"/);
+  });
+
+  it("retargets protocol-relative and mailto/tel anchors", () => {
+    for (const href of ["//example.com", "mailto:a@b.c", "tel:+15551234"]) {
+      const out = scrubHtml(`<a href="${href}">x</a>`);
+      expect(out).toContain(`target="_blank"`);
+    }
+  });
+
+  it("leaves relative and fragment anchors alone", () => {
+    const out = scrubHtml(`<a href="#section">x</a><a href="/local">y</a><a href="rel.html">z</a>`);
+    expect(out).not.toContain(`target="_blank"`);
+  });
+
+  it("preserves existing rel tokens when adding noopener/noreferrer", () => {
+    const out = scrubHtml(`<a href="https://example.com" rel="nofollow">x</a>`);
+    expect(out).toMatch(/rel="[^"]*\bnofollow\b[^"]*"/);
+    expect(out).toMatch(/rel="[^"]*\bnoopener\b[^"]*"/);
+    expect(out).toMatch(/rel="[^"]*\bnoreferrer\b[^"]*"/);
+  });
 });
 
 describe("buildSafeSrcdoc", () => {

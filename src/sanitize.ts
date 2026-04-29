@@ -51,11 +51,24 @@ export function scrubHtml(input: string): string {
         el.remove();
         continue;
       }
+      if (tag === "a") retargetExternalAnchor(el);
       walk(el);
     }
   };
   walk(root);
   return root.toString();
+}
+
+function retargetExternalAnchor(el: HTMLElement): void {
+  const href = el.getAttribute("href");
+  if (!href) return;
+  if (!/^(?:https?:|mailto:|tel:)/i.test(href) && !href.startsWith("//")) return;
+  el.setAttribute("target", "_blank");
+  const rel = (el.getAttribute("rel") ?? "").trim();
+  const tokens = new Set(rel ? rel.split(/\s+/) : []);
+  tokens.add("noopener");
+  tokens.add("noreferrer");
+  el.setAttribute("rel", [...tokens].join(" "));
 }
 
 function shouldRemove(tag: string, el: HTMLElement): boolean {
