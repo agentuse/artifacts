@@ -31,6 +31,11 @@ function rewriteRelativeAsset(baseUrl: string, src: string | undefined): string 
   return new URL(src, window.location.origin + baseUrl).pathname;
 }
 
+function isExternalHref(href: string | undefined): boolean {
+  if (!href) return false;
+  return /^(?:https?:|mailto:|tel:)/i.test(href) || href.startsWith("//");
+}
+
 export function Tile(props: { artifactId: string; record: ArtifactRecord }) {
   const url = artifactUrl(props.artifactId, props.record);
   if (props.record.type === "html") {
@@ -40,7 +45,7 @@ export function Tile(props: { artifactId: string; record: ArtifactRecord }) {
     return (
       <div className="tile-body html">
         <iframe
-          sandbox="allow-scripts"
+          sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
           src={props.record.local ? url : `/api/render/${props.artifactId}`}
           title="artifact"
         />
@@ -103,6 +108,16 @@ function MarkdownTile(props: { artifactId: string; url: string }) {
             img: ({ src, ...imgProps }) => (
               <img {...imgProps} src={rewriteRelativeAsset(props.url, src)} />
             ),
+            a: ({ href, children, ...anchorProps }) =>
+              isExternalHref(href) ? (
+                <a {...anchorProps} href={href} target="_blank" rel="noopener noreferrer">
+                  {children}
+                </a>
+              ) : (
+                <a {...anchorProps} href={href}>
+                  {children}
+                </a>
+              ),
           }}
         >
           {content}
