@@ -3,13 +3,14 @@ import { Menu, X } from "lucide-react";
 import { fetchManifest } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
-import { ArtifactList } from "./components/ArtifactList";
+import { ArtifactList, groupKeyOf } from "./components/ArtifactList";
 import { Canvas } from "./components/Canvas";
 
 interface Route {
   projectId?: string;
   runId?: string;
   artifactName?: string;
+  group?: string;
   revision?: number;
   expandedId?: string;
   drawerOpen?: boolean;
@@ -26,6 +27,7 @@ function parseRoute(href: string): Route {
     if (part === "p" && next) route.projectId = decodeURIComponent(next);
     if (part === "r" && next) route.runId = decodeURIComponent(next);
     if (part === "a" && next) route.artifactName = decodeURIComponent(next);
+    if (part === "g" && next) route.group = decodeURIComponent(next);
     if (part === "v" && next) route.revision = parseInt(next, 10);
     if (part === "f" && next) route.expandedId = decodeURIComponent(next);
   }
@@ -42,6 +44,8 @@ function navRoute(r: Route, replace = false): void {
   } else if (r.artifactName) {
     parts.push("a", encodeURIComponent(r.artifactName));
     if (r.revision != null) parts.push("v", String(r.revision));
+  } else if (r.group) {
+    parts.push("g", encodeURIComponent(r.group));
   }
   if (r.expandedId) parts.push("f", encodeURIComponent(r.expandedId));
   const params = new URLSearchParams();
@@ -110,10 +114,14 @@ export function App() {
         .filter(([, a]) => route.revision == null || a.revision === route.revision);
     }
     const latestMap = manifest.latest[route.projectId] ?? {};
-    return Object.values(latestMap)
+    const latest = Object.values(latestMap)
       .map((id) => [id, manifest.artifacts[id]] as [string, ArtifactRecord | undefined])
       .filter((e): e is [string, ArtifactRecord] => !!e[1]);
-  }, [manifest, route.projectId, route.artifactName, route.revision]);
+    if (route.group != null) {
+      return latest.filter(([, a]) => groupKeyOf(a) === route.group);
+    }
+    return latest;
+  }, [manifest, route.projectId, route.artifactName, route.revision, route.group]);
 
   const drawerOpen = !!route.drawerOpen;
   const panesHidden = !!route.panesHidden;
@@ -130,6 +138,17 @@ export function App() {
     const next: Route = {
       projectId: route.projectId,
       artifactName,
+      drawerOpen: route.drawerOpen,
+      panesHidden: route.panesHidden,
+    };
+    setRoute(next);
+    navRoute(next);
+  };
+
+  const onSelectGroup = (group: string | undefined) => {
+    const next: Route = {
+      projectId: route.projectId,
+      group,
       drawerOpen: route.drawerOpen,
       panesHidden: route.panesHidden,
     };
@@ -169,7 +188,7 @@ export function App() {
         aria-label={panesHidden ? "show panes" : "hide panes"}
         title={panesHidden ? "show panes" : "hide panes"}
       >
-        {panesHidden ? <Menu size={18} strokeWidth={2} /> : <X size={18} strokeWidth={2} />}
+        {panesHidden ? <Menu size={16} strokeWidth={1.75} /> : <X size={14} strokeWidth={1.5} />}
       </button>
       <div className="drawer">
         <Sidebar
@@ -181,7 +200,9 @@ export function App() {
           manifest={manifest}
           projectId={route.projectId}
           selected={route.artifactName}
+          selectedGroup={route.group}
           onSelect={onSelectArtifact}
+          onSelectGroup={onSelectGroup}
         />
       </div>
       <div className="backdrop" onClick={() => setDrawerOpen(false)} />

@@ -216,6 +216,30 @@ export function listLocalArtifactsForProject(
         const type = inferType(rel);
         artifacts.push(makeLocalArtifact(projectId, ent.name, type, rel, entryAbs));
       }
+      // Sibling .html / .md files in the same dir become additional artifacts
+      // named `<dir>/<file>`, so multiple artifacts can share supporting
+      // assets (css, images) in the same dir.
+      let sub: fs.Dirent[];
+      try {
+        sub = fs.readdirSync(abs, { withFileTypes: true });
+      } catch {
+        sub = [];
+      }
+      for (const f of sub) {
+        if (!f.isFile()) continue;
+        if (f.name.startsWith(".")) continue;
+        if (f.name === "index.html" || f.name === "index.md") continue;
+        let type: ArtifactType;
+        try {
+          type = inferType(f.name);
+        } catch {
+          continue;
+        }
+        if (type !== "html" && type !== "markdown") continue;
+        const rel = toPosix(path.join(ent.name, f.name));
+        const fAbs = path.join(abs, f.name);
+        artifacts.push(makeLocalArtifact(projectId, rel, type, rel, fAbs));
+      }
       continue;
     }
     if (!ent.isFile()) continue;
