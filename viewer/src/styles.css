@@ -418,11 +418,21 @@ html, body, #root {
   font-size: 12.5px;
   letter-spacing: 0.01em;
   color: var(--fg);
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tile-head .mtime {
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  opacity: 0.75;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  margin-left: -2px;
 }
 
 /* Revision pill: cyan, the secondary agentuse accent, to keep "current name"

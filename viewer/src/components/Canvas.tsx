@@ -32,6 +32,34 @@ const MIN_TILE_W = 280;
 const MIN_TILE_H = 200;
 const STORAGE_KEY = "agentuse-artifacts.tile-sizes.v1";
 
+function formatRelativeTime(iso: string, now: number): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  const diff = Math.max(0, Math.floor((now - t) / 1000));
+  if (diff < 60) return `${diff}s ago`;
+  const m = Math.floor(diff / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+function RelativeTime(props: { iso: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const label = formatRelativeTime(props.iso, now);
+  if (!label) return null;
+  return (
+    <span className="mtime" title={new Date(props.iso).toLocaleString()}>
+      {label}
+    </span>
+  );
+}
+
 type SizeMap = Record<string, { w: number; h: number }>;
 
 /** sizeOverrides is keyed by `${projectId}/${name}` (NOT artifactId) so a
@@ -640,6 +668,7 @@ export function Canvas(props: {
           className="tile-head tile-head-floating"
         >
           <span className="name">{focusedShowRec.name}</span>
+          <RelativeTime iso={focusedShowRec.createdAt} />
           {focusedRevisions.length > 1 && (
             <span className="rev">
               <select
@@ -774,7 +803,8 @@ function TileWrapper(props: TileWrapperProps) {
     >
       {showInTileHead && (
         <div className="tile-head">
-          <span className="name">{showRec.name}</span>
+          <span className="name">{showRec.localEntry ?? showRec.name}</span>
+          <RelativeTime iso={showRec.createdAt} />
           {revisions.length > 1 && (
             <span className="rev">
               <select
