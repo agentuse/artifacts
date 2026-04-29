@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -39,19 +39,13 @@ function isExternalHref(href: string | undefined): boolean {
 export function Tile(props: { artifactId: string; record: ArtifactRecord }) {
   const url = artifactUrl(props.artifactId, props.record);
   if (props.record.type === "html") {
-    // The iframe loads sanitized HTML. The server attaches CSP and injects a
-    // clipboard writeText shim; sandbox (no allow-same-origin) keeps the iframe
-    // in an opaque origin so its scripts cannot reach the parent viewer.
-    return (
-      <div className="tile-body html">
-        <iframe
-          sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-          allow="clipboard-write"
-          src={props.record.local ? url : `/api/render/${props.artifactId}`}
-          title="artifact"
-        />
-      </div>
-    );
+    // Routed through HtmlTile so we can preserve scroll across hot reloads:
+    // when the file changes, the iframe src changes (cache-bust) and the
+    // iframe navigates from scratch. The shim injected by the server posts
+    // scrollY back here on scroll; HtmlTile remembers it and re-attaches it
+    // as a #sy=NNN hash on the next src so the iframe restores on load.
+    const baseSrc = props.record.local ? url : `/api/render/${props.artifactId}`;
+    return <HtmlTile baseSrc={baseSrc} />;
   }
   if (props.record.type === "pdf") {
     // Firefox renders PDFs via PDF.js (a real JS app), so the iframe needs
@@ -77,17 +71,73 @@ export function Tile(props: { artifactId: string; record: ArtifactRecord }) {
   return <MarkdownTile artifactId={props.artifactId} url={url} />;
 }
 
+function HtmlTile(props: { baseSrc: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // Latest scroll position the iframe reported via postMessage. Stored in a
+  // ref (not state) so scroll updates do not trigger a parent re-render, and
+  // do not feed back into the iframe's `src` to cause a reload mid-scroll.
+  // The ref is read only when baseSrc changes.
+  const lastScrollRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      // Only trust messages coming from this specific iframe's window. The
+      // sandbox (no allow-same-origin) gives it an opaque origin (e.origin is
+      // "null"), so a source-identity check is the only reliable filter.
+      if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return;
+      const data = e.data as { type?: unknown; y?: unknown; x?: unknown } | null;
+      if (!data || data.type !== "agentuse:scroll") return;
+      if (typeof data.y !== "number") return;
+      lastScrollRef.current = {
+        x: typeof data.x === "number" ? data.x : 0,
+        y: data.y,
+      };
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // Recompute the src only when baseSrc (i.e. the cache-busted URL) changes.
+  // At that moment we read the latest known scroll from the ref and append it
+  // as a hash, so the in-iframe shim can restore the position on load. Reading
+  // a mutable ref during useMemo is intentional: we want a snapshot taken at
+  // the precise moment the src rebuild happens.
+  const src = useMemo(() => {
+    const stored = lastScrollRef.current;
+    if (!stored || stored.y <= 0) return props.baseSrc;
+    const sep = props.baseSrc.includes("#") ? "&" : "#";
+    return `${props.baseSrc}${sep}sy=${Math.round(stored.y)}&sx=${Math.round(stored.x)}`;
+  }, [props.baseSrc]);
+
+  return (
+    <div className="tile-body html">
+      <iframe
+        ref={iframeRef}
+        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
+        allow="clipboard-write"
+        src={src}
+        title="artifact"
+      />
+    </div>
+  );
+}
+
 function MarkdownTile(props: { artifactId: string; url: string }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    setContent(null);
-    setError(null);
+    // Don't blank `content` here on URL change. The URL changes whenever the
+    // file's contentHash changes (hot reload), and blanking would collapse
+    // the scrollable container's height, losing the user's scroll position
+    // mid-read. Keep showing the previous content until the new fetch resolves.
     fetchArtifact(props.url)
       .then((c) => {
-        if (alive) setContent(c);
+        if (alive) {
+          setContent(c);
+          setError(null);
+        }
       })
       .catch((e) => {
         if (alive) setError(String(e));

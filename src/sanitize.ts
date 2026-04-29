@@ -152,6 +152,64 @@ export const ARTIFACT_RUNTIME_SHIM = `<script>
 })();
 </script>`;
 
+// Scroll-preservation shim. The artifact iframe is an opaque origin, so the
+// parent viewer cannot read contentWindow.scrollY directly. Instead the iframe
+// posts its scroll position to the parent on scroll (rAF-throttled), and on
+// load it reads `#sy=NNN` from location.hash (set by the parent before src
+// change) and scrolls to it. Without this, every hot reload jumps the user
+// back to the top of the document.
+export const ARTIFACT_SCROLL_SHIM = `<script>
+(() => {
+  const restoreFromHash = () => {
+    try {
+      const h = window.location.hash || "";
+      if (!h.startsWith("#")) return;
+      const params = new URLSearchParams(h.slice(1));
+      const sy = Number(params.get("sy"));
+      const sx = Number(params.get("sx"));
+      if (Number.isFinite(sy) && sy > 0) {
+        window.scrollTo({
+          left: Number.isFinite(sx) ? sx : 0,
+          top: sy,
+          behavior: "instant",
+        });
+      }
+    } catch {}
+  };
+
+  // Restore as early as possible. Run once now (in case content is already
+  // laid out), and again after load (when fonts/images may have shifted layout).
+  restoreFromHash();
+  if (document.readyState === "complete") {
+    restoreFromHash();
+  } else {
+    window.addEventListener("load", restoreFromHash, { once: true });
+  }
+
+  let pending = false;
+  const post = () => {
+    pending = false;
+    try {
+      const y = window.scrollY || (document.scrollingElement && document.scrollingElement.scrollTop) || 0;
+      const x = window.scrollX || (document.scrollingElement && document.scrollingElement.scrollLeft) || 0;
+      window.parent.postMessage(
+        { type: "agentuse:scroll", y: Math.round(y), x: Math.round(x) },
+        "*",
+      );
+    } catch {}
+  };
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(post);
+    },
+    { passive: true },
+  );
+})();
+</script>`;
+
 const PRELOAD_REL = new Set(["preload", "prefetch", "dns-prefetch", "preconnect", "modulepreload"]);
 
 /**
@@ -225,7 +283,7 @@ function shouldRemove(tag: string, el: HTMLElement): boolean {
 export function buildSafeSrcdoc(input: string): string {
   const scrubbed = scrubHtml(input);
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${META_CSP}">`;
-  const headInjection = cspMeta + ARTIFACT_RUNTIME_SHIM;
+  const headInjection = cspMeta + ARTIFACT_RUNTIME_SHIM + ARTIFACT_SCROLL_SHIM;
 
   // If the document has a <head>, inject as the first child of head; otherwise
   // prepend a synthetic <head>.
