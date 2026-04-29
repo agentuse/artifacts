@@ -1,20 +1,21 @@
 ---
 name: agentuse-artifacts
-description: Save substantial markdown/HTML deliverables as project-local, viewable artifacts using @agentuse/artifacts. Use proactively whenever you generate a report, plan, spec, HTML page, dashboard, chart, or rendered document the user will want to preview in a browser. Supports artifact folders with CSS/images/fonts under ./.agentuse/artifacts/. Also triggers on "save as artifact", "preview this", "render this", "make it viewable", "artifact".
+description: Save substantial markdown/HTML deliverables as project-local, viewable artifacts using @agentuse/artifacts. Each artifact lives in its own subdirectory under ./.agentuse/artifacts/ (e.g. report/index.html, market-analysis/index.md) so related files stay grouped. Use proactively whenever you generate a report, plan, spec, HTML page, dashboard, chart, or rendered document the user will want to preview in a browser. Also triggers on "save as artifact", "preview this", "render this", "make it viewable", "artifact".
 ---
 
 # agentuse-artifacts
 
 Use `@agentuse/artifacts` to save AI-generated deliverables into a project-local artifact directory and preview them in the local viewer.
 
-Primary model:
+Primary model: every artifact lives in its own subdirectory under `./.agentuse/artifacts/`, even single-file markdown. This keeps related files grouped together and makes it trivial to add support files later.
 
 ```txt
 <project>/.agentuse/artifacts/
   report/index.html
   report/style.css
   report/chart.png
-  notes.md
+  notes/notes.md
+  market-analysis/index.md
 ```
 
 Artifacts are normal project files. Support files work through relative paths.
@@ -53,17 +54,19 @@ Most commands accept `--json`.
    npx @agentuse/artifacts init
    ```
 
-2. Write the deliverable under:
+2. Always write the deliverable inside a subdirectory named after the artifact, never as a bare file at the artifacts root:
 
    ```txt
    .agentuse/artifacts/<artifact-name>/index.html
    ```
 
-   or for standalone markdown:
+   or for markdown:
 
    ```txt
-   .agentuse/artifacts/<artifact-name>.md
+   .agentuse/artifacts/<artifact-name>/index.md
    ```
+
+   Do this even for single-file artifacts. Grouping by folder keeps related artifacts together and lets you add support files later without restructuring.
 
 3. Put support files next to the entry file and reference them relatively:
 
@@ -110,7 +113,7 @@ Most commands accept `--json`.
 
 ## Artifact layout conventions
 
-Preferred HTML artifact:
+Always use a subdirectory per artifact. Preferred HTML artifact:
 
 ```txt
 .agentuse/artifacts/customer-report/
@@ -122,29 +125,11 @@ Preferred HTML artifact:
 Preferred markdown artifact:
 
 ```txt
-.agentuse/artifacts/customer-report.md
+.agentuse/artifacts/market-analysis/
+  index.md
 ```
 
-Directory artifacts are detected when they contain:
-
-```txt
-index.html
-index.md
-```
-
-Standalone root files detected:
-
-```txt
-*.html
-*.htm
-*.md
-*.markdown
-*.png
-*.jpg
-*.jpeg
-*.webp
-*.pdf
-```
+Directory artifacts are detected when they contain `index.html` or `index.md`. The viewer also detects standalone root files (`*.html`, `*.md`, `*.png`, `*.pdf`, etc.), but do not produce those: a folder with `index.md` is preferred even when there are no support files, so artifacts stay grouped.
 
 Use simple, URL-safe artifact folder names, e.g. `market-analysis`, `landing-page`, `qa-report`.
 
@@ -182,7 +167,8 @@ Then tell the user:
 
 ```bash
 npx @agentuse/artifacts init
-cat > .agentuse/artifacts/market-analysis.md <<'EOF'
+mkdir -p .agentuse/artifacts/market-analysis
+cat > .agentuse/artifacts/market-analysis/index.md <<'EOF'
 # Market Analysis
 ...
 EOF
