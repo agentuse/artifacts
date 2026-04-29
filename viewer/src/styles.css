@@ -2,7 +2,6 @@
    @agentuse/artifacts viewer — palette tuned to agentuse.io
    - Geist Sans / Geist Mono (loaded from index.html)
    - Phosphor green primary accent (#05df72, Tailwind green-400)
-   - Cyan secondary accent (#00d2ef, Tailwind cyan-400) for revisions
    - True-black canvas in dark mode, pure white in light mode
    - Mono labels in tracking-wider uppercase for the terminal feel
    --------------------------------------------------------------------------- */
@@ -20,8 +19,6 @@
   --accent: #00a854;          /* green-600-ish: AA-readable on white */
   --accent-soft: rgba(0, 168, 84, 0.10);
   --accent-ring: rgba(0, 168, 84, 0.32);
-  --accent-2: #0e7490;        /* cyan-700: revision pill on light */
-  --accent-2-soft: rgba(14, 116, 144, 0.10);
   --tile-bg: #ffffff;
   --pane-bg: #fafafa;
   --pane-bg-elev: #f4f4f5;
@@ -42,8 +39,6 @@
     --accent: #05df72;        /* phosphor green */
     --accent-soft: rgba(5, 223, 114, 0.10);
     --accent-ring: rgba(5, 223, 114, 0.30);
-    --accent-2: #00d2ef;      /* cyan-400 */
-    --accent-2-soft: rgba(0, 210, 239, 0.10);
     --tile-bg: #0f0f10;
     --pane-bg: #050506;
     --pane-bg-elev: #111113;
@@ -424,37 +419,6 @@ html, body, #root {
   margin-left: -2px;
 }
 
-/* Revision pill: cyan, the secondary agentuse accent, to keep "current name"
-   (green) and "current revision" (cyan) visually distinct. */
-.tile-head .rev {
-  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  color: var(--accent-2);
-  background: var(--accent-2-soft);
-  padding: 0 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  transition: border-color 120ms ease;
-}
-.tile-head .rev:hover { border-color: var(--accent-2); }
-.tile-head .rev select {
-  background: transparent;
-  border: none;
-  color: var(--accent-2);
-  font: inherit;
-  cursor: pointer;
-  /* Native pickers on iOS need a minimum tappable height. The pill above
-     is 36px; the select fills it via the inline-flex layout. */
-  min-height: 36px;
-  padding: 0 4px;
-}
-
 .tile-body-wrap {
   position: relative;
   flex: 1;
@@ -796,7 +760,7 @@ html, body, #root {
     width: 100%;
     height: 100vh;
   }
-  /* Drawer overlays from the left, holds Sidebar + RunList stacked. */
+  /* Drawer overlays from the left and stacks the navigation panes. */
   .drawer {
     display: flex;
     flex-direction: column;

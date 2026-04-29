@@ -13,7 +13,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import type { ArtifactRecord, ArtifactType, Manifest } from "../types";
+import type { ArtifactRecord, ArtifactType } from "../types";
 import { Tile } from "./Tile";
 
 const TILE_W = 720;
@@ -63,7 +63,7 @@ function RelativeTime(props: { iso: string }) {
 type SizeMap = Record<string, { w: number; h: number }>;
 
 /** sizeOverrides is keyed by `${projectId}/${name}` (NOT artifactId) so a
- *  user-set size persists across new revisions of the same artifact. */
+ *  user-set size persists as the artifact file changes. */
 const sizeKey = (rec: { projectId: string; name: string }): string =>
   `${rec.projectId}/${rec.name}`;
 
@@ -136,7 +136,6 @@ const FLOATING_HEAD_MIN_TOP = 8;
 const FLOATING_HEAD_MARGIN = 8;
 
 export function Canvas(props: {
-  manifest: Manifest;
   artifacts: Array<[string, ArtifactRecord]>;
   expandedId: string | null;
   panesHidden?: boolean;
@@ -148,14 +147,9 @@ export function Canvas(props: {
   // floating head (positioned in screen space, see below) so the controls
   // stay readable at any zoom. Click outside or Esc to exit.
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  // Per-tile revision selection. Lifted from TileWrapper so the floating
-  // head and the in-tile head (used in fullscreen) read/write the same map.
-  const [revisionOverrides, setRevisionOverrides] = useState<
-    Record<string, string>
-  >({});
   // Per-tile size overrides set by the focused-tile resize handle. Keyed by
-  // `${projectId}/${name}` so the size sticks across new revisions of the
-  // same artifact. Hydrated from localStorage on mount; we persist once per
+  // `${projectId}/${name}` so the size sticks as the artifact file changes.
+  // Hydrated from localStorage on mount; we persist once per
   // resize gesture (in the pointerup callback inside handleResizeStart),
   // not on every pointermove, to avoid 60-writes-per-second.
   const [sizeOverrides, setSizeOverrides] = useState<SizeMap>(() =>
@@ -169,22 +163,6 @@ export function Canvas(props: {
   const [wrapWidth, setWrapWidth] = useState<number>(() =>
     typeof window !== "undefined" ? window.innerWidth : 1600,
   );
-  // Default to the latest revision of the same (project, name) so the
-  // fullscreen overlay and floating head hot-reload when a new revision
-  // arrives. Without this, expandedId is frozen at the moment the user hit
-  // expand — canvas tiles update because the latest map remounts them with
-  // a new id, but the overlay never sees that swap. An explicit dropdown
-  // pick wins, so manually pinning to v2 still sticks.
-  const showIdFor = (id: string) => {
-    const override = revisionOverrides[id];
-    if (override) return override;
-    const rec = props.manifest.artifacts[id];
-    if (!rec) return id;
-    return props.manifest.latest[rec.projectId]?.[rec.name] ?? id;
-  };
-  const setShowIdFor = (id: string, next: string) =>
-    setRevisionOverrides((prev) => ({ ...prev, [id]: next }));
-
   // Row-flow layout. Column count flexes with the wrapper width so wide
   // viewports actually use the available horizontal space (instead of a
   // fixed 2-col grid that left a big right-side gap). Tiles get placed
@@ -216,7 +194,7 @@ export function Canvas(props: {
     // a guess and can be aspect-wrong (e.g. an agent passing 720×1100 for
     // a landscape PNG, which letterboxes inside a portrait tile). Suggested
     // remains the fallback for old artifacts that predate the natural-dim
-    // probe (run `artifacts fsck` to backfill). MIN_TILE_W/H floors keep
+    // probe. MIN_TILE_W/H floors keep
     // a tiny image from collapsing to an unusable size.
     const ov = sizeOverrides[sizeKey(rec)];
     const natural = naturalDefault(rec);
@@ -440,14 +418,8 @@ export function Canvas(props: {
     if (expandedId && focusedId) setFocusedId(null);
   }, [expandedId, focusedId]);
 
-  // Resolve the expanded record from the manifest so the overlay survives a
-  // revision switch made from inside the canvas tile.
-  const expandedShowId = expandedId ? showIdFor(expandedId) : null;
-  const expandedRec = expandedShowId
-    ? props.manifest.artifacts[expandedShowId]
-    : undefined;
-  const expandedOriginalRec = expandedId
-    ? props.manifest.artifacts[expandedId]
+  const expandedRec = expandedId
+    ? artifacts.find(([id]) => id === expandedId)?.[1]
     : undefined;
 
   // ── Floating head positioning ──────────────────────────────────────────
@@ -567,23 +539,9 @@ export function Canvas(props: {
     window.addEventListener("pointercancel", onUp);
   };
 
-  // Resolve focused-tile state for the floating head's controls.
-  const focusedShowId = focusedId ? showIdFor(focusedId) : null;
-  const focusedShowRec = focusedShowId
-    ? props.manifest.artifacts[focusedShowId]
+  const focusedRec = focusedId
+    ? artifacts.find(([id]) => id === focusedId)?.[1]
     : undefined;
-  const focusedOriginalRec = focusedId
-    ? props.manifest.artifacts[focusedId]
-    : undefined;
-  const focusedRevisions = focusedOriginalRec
-    ? Object.entries(props.manifest.artifacts)
-        .filter(
-          ([, a]) =>
-            a.projectId === focusedOriginalRec.projectId &&
-            a.name === focusedOriginalRec.name,
-        )
-        .sort((a, b) => b[1].revision - a[1].revision)
-    : [];
 
   if (artifacts.length === 0) {
     return (
@@ -641,7 +599,6 @@ export function Canvas(props: {
                     key={id}
                     artifactId={id}
                     record={rec}
-                    manifest={props.manifest}
                     x={x}
                     y={y}
                     w={w}
@@ -652,8 +609,6 @@ export function Canvas(props: {
                     onResizeStart={(e) =>
                       handleResizeStart(sizeKey(rec), w, h, e)
                     }
-                    showId={showIdFor(id)}
-                    onShowIdChange={(next) => setShowIdFor(id, next)}
                   />
                 ))}
               </div>
@@ -661,32 +616,18 @@ export function Canvas(props: {
           </>
         )}
       </TransformWrapper>
-      {focusedId && focusedShowRec && (
+      {focusedId && focusedRec && (
         <div
           ref={floatingHeadRef}
           data-floating-head-for={focusedId}
           className="tile-head tile-head-floating"
         >
-          <span className="name">{focusedShowRec.name}</span>
-          <RelativeTime iso={focusedShowRec.createdAt} />
-          {focusedRevisions.length > 1 && (
-            <span className="rev">
-              <select
-                value={focusedShowId ?? focusedId}
-                onChange={(e) => setShowIdFor(focusedId, e.target.value)}
-              >
-                {focusedRevisions.map(([id, r]) => (
-                  <option key={id} value={id}>
-                    v{r.revision}
-                  </option>
-                ))}
-              </select>
-            </span>
-          )}
+          <span className="name">{focusedRec.name}</span>
+          <RelativeTime iso={focusedRec.createdAt} />
           <TileActions
-            artifactId={focusedShowId ?? focusedId}
-            type={focusedShowRec.type}
-            name={focusedShowRec.name}
+            artifactId={focusedId}
+            type={focusedRec.type}
+            name={focusedRec.name}
           />
           <button
             className="icon-btn"
@@ -706,16 +647,13 @@ export function Canvas(props: {
           </button>
         </div>
       )}
-      {expandedId && expandedRec && expandedOriginalRec && (
+      {expandedId && expandedRec && (
         <TileWrapper
           key={"expanded-" + expandedId}
           artifactId={expandedId}
-          record={expandedOriginalRec}
-          manifest={props.manifest}
+          record={expandedRec}
           expanded
           onClose={() => onExpandedChange(null)}
-          showId={expandedShowId ?? expandedId}
-          onShowIdChange={(next) => setShowIdFor(expandedId, next)}
         />
       )}
     </div>
@@ -725,9 +663,6 @@ export function Canvas(props: {
 type TileWrapperProps = {
   artifactId: string;
   record: ArtifactRecord;
-  manifest: Manifest;
-  showId: string;
-  onShowIdChange: (next: string) => void;
 } & (
   | {
       expanded?: false;
@@ -756,16 +691,6 @@ type TileWrapperProps = {
 );
 
 function TileWrapper(props: TileWrapperProps) {
-  const showRec = props.manifest.artifacts[props.showId] ?? props.record;
-
-  // Discover all revisions of this name in this project for the dropdown.
-  const revisions = Object.entries(props.manifest.artifacts)
-    .filter(
-      ([, a]) =>
-        a.projectId === props.record.projectId && a.name === props.record.name,
-    )
-    .sort((a, b) => b[1].revision - a[1].revision);
-
   // Position via transform: translate(...) instead of left/top so that
   // layout reflows can be animated cheaply via a CSS transition on
   // `transform` (see styles.css). left/top transitions trigger layout on
@@ -803,26 +728,12 @@ function TileWrapper(props: TileWrapperProps) {
     >
       {showInTileHead && (
         <div className="tile-head">
-          <span className="name">{showRec.localEntry ?? showRec.name}</span>
-          <RelativeTime iso={showRec.createdAt} />
-          {revisions.length > 1 && (
-            <span className="rev">
-              <select
-                value={props.showId}
-                onChange={(e) => props.onShowIdChange(e.target.value)}
-              >
-                {revisions.map(([id, r]) => (
-                  <option key={id} value={id}>
-                    v{r.revision}
-                  </option>
-                ))}
-              </select>
-            </span>
-          )}
+          <span className="name">{props.record.localEntry ?? props.record.name}</span>
+          <RelativeTime iso={props.record.createdAt} />
           <TileActions
-            artifactId={props.showId}
-            type={showRec.type}
-            name={showRec.name}
+            artifactId={props.artifactId}
+            type={props.record.type}
+            name={props.record.name}
           />
           {props.expanded ? (
             <button
@@ -852,7 +763,7 @@ function TileWrapper(props: TileWrapperProps) {
             : undefined
         }
       >
-        <Tile artifactId={props.showId} record={showRec} />
+        <Tile artifactId={props.artifactId} record={props.record} />
       </div>
       {/* Resize handle is only meaningful for a focused, non-expanded tile;
           fullscreen has no concept of size, and previews swallow pointer

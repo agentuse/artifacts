@@ -12,21 +12,11 @@ export interface ProjectRecord {
   updatedAt?: string;
 }
 
-export interface RunRecord {
-  projectId: string;
-  createdAt: string;
-}
-
 export interface ArtifactRecord {
   projectId: string;
-  /** Legacy field retained on the wire shape so the viewer's RunList
-   *  panel keeps deserializing existing payloads. Local artifacts never
-   *  populate it. */
-  runId?: string;
   name: string;
   type: "markdown" | "html" | "png" | "jpg" | "webp" | "pdf";
   revision: number;
-  previousArtifactId?: string;
   contentHash: string;
   size: number;
   createdAt: string;
@@ -54,7 +44,6 @@ export interface ArtifactRecord {
 export interface Manifest {
   schemaVersion: number;
   projects: Record<string, ProjectRecord>;
-  runs: Record<string, RunRecord>;
   artifacts: Record<string, ArtifactRecord>;
   /** project_id -> name -> latest artifact_id */
   latest: Record<string, Record<string, string>>;
@@ -64,7 +53,6 @@ function emptyManifest(): Manifest {
   return {
     schemaVersion: SCHEMA_VERSION,
     projects: {},
-    runs: {},
     artifacts: {},
     latest: {},
   };
@@ -100,7 +88,6 @@ export function readManifest(): Manifest {
   }
   // Defensive defaults for forward-compat reads.
   m.projects ??= {};
-  m.runs ??= {};
   m.artifacts ??= {};
   m.latest ??= {};
   return m;

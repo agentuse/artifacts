@@ -155,7 +155,6 @@ export function buildLocalManifest(): Manifest {
   const manifest: Manifest = {
     schemaVersion: base.schemaVersion,
     projects: base.projects,
-    runs: {},
     artifacts: {},
     latest: {},
   };

@@ -9,10 +9,8 @@ import { loadSort, saveSort, type SortMode } from "./sort";
 
 interface Route {
   projectId?: string;
-  runId?: string;
   artifactName?: string;
   group?: string;
-  revision?: number;
   expandedId?: string;
   drawerOpen?: boolean;
   panesHidden?: boolean;
@@ -26,10 +24,8 @@ function parseRoute(href: string): Route {
     const part = parts[i]!;
     const next = parts[i + 1];
     if (part === "p" && next) route.projectId = decodeURIComponent(next);
-    if (part === "r" && next) route.runId = decodeURIComponent(next);
     if (part === "a" && next) route.artifactName = decodeURIComponent(next);
     if (part === "g" && next) route.group = decodeURIComponent(next);
-    if (part === "v" && next) route.revision = parseInt(next, 10);
     if (part === "f" && next) route.expandedId = decodeURIComponent(next);
   }
   if (u.searchParams.get("d") === "1") route.drawerOpen = true;
@@ -40,11 +36,8 @@ function parseRoute(href: string): Route {
 function navRoute(r: Route, replace = false): void {
   const parts: string[] = [];
   if (r.projectId) parts.push("p", encodeURIComponent(r.projectId));
-  if (r.runId) {
-    parts.push("r", encodeURIComponent(r.runId));
-  } else if (r.artifactName) {
+  if (r.artifactName) {
     parts.push("a", encodeURIComponent(r.artifactName));
-    if (r.revision != null) parts.push("v", String(r.revision));
   } else if (r.group) {
     parts.push("g", encodeURIComponent(r.group));
   }
@@ -116,9 +109,7 @@ export function App() {
       ([, a]) => a.projectId === route.projectId,
     );
     if (route.artifactName) {
-      return all
-        .filter(([, a]) => a.name === route.artifactName)
-        .filter(([, a]) => route.revision == null || a.revision === route.revision);
+      return all.filter(([, a]) => a.name === route.artifactName);
     }
     const latestMap = manifest.latest[route.projectId] ?? {};
     const latest = Object.values(latestMap)
@@ -128,7 +119,7 @@ export function App() {
       return latest.filter(([, a]) => groupKeyOf(a) === route.group);
     }
     return latest;
-  }, [manifest, route.projectId, route.artifactName, route.revision, route.group]);
+  }, [manifest, route.projectId, route.artifactName, route.group]);
 
   const drawerOpen = !!route.drawerOpen;
   const panesHidden = !!route.panesHidden;
@@ -242,7 +233,6 @@ export function App() {
       </div>
       <div className="backdrop" onClick={() => setDrawerOpen(false)} />
       <Canvas
-        manifest={manifest}
         artifacts={selectedArtifacts}
         expandedId={route.expandedId ?? null}
         panesHidden={panesHidden}
