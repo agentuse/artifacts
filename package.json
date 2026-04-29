@@ -43,7 +43,7 @@
     "dev": "tsx src/bin.ts",
     "dev:server": "tsx watch src/bin.ts serve",
     "dev:viewer": "cd viewer && npm run dev",
-    "watch:viewer": "cd viewer && vite build --watch --outDir ../viewer-dist --emptyOutDir",
+    "watch:viewer": "cd viewer && vite build --watch --outDir ../viewer-dist",
     "watch": "concurrently -n server,viewer -c cyan,yellow \"npm:dev:server\" \"npm:watch:viewer\"",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "release:dry": "npm publish --dry-run"
