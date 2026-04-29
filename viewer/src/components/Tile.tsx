@@ -9,11 +9,20 @@ function encodeLocalEntry(entry: string): string {
   return entry.split("/").map(encodeURIComponent).join("/");
 }
 
+function cacheBust(url: string, record: ArtifactRecord): string {
+  // contentHash is mtime+size for local artifacts (stable id, mutable content)
+  // and a content hash for stored ones. Either way, it changes iff the bytes
+  // change, so it's the right cache-busting key for both iframes and fetches.
+  if (!record.contentHash) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}v=${encodeURIComponent(record.contentHash)}`;
+}
+
 function artifactUrl(artifactId: string, record: ArtifactRecord): string {
-  if (record.local && record.localEntry) {
-    return `/api/project-artifacts/${encodeURIComponent(record.projectId)}/${encodeLocalEntry(record.localEntry)}`;
-  }
-  return `/api/artifact/${artifactId}`;
+  const base = record.local && record.localEntry
+    ? `/api/project-artifacts/${encodeURIComponent(record.projectId)}/${encodeLocalEntry(record.localEntry)}`
+    : `/api/artifact/${artifactId}`;
+  return cacheBust(base, record);
 }
 
 function rewriteRelativeAsset(baseUrl: string, src: string | undefined): string | undefined {

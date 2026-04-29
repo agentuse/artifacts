@@ -208,23 +208,28 @@ export function listLocalArtifactsForProject(
     if (ent.name.startsWith(".")) continue;
     const abs = path.join(root, ent.name);
     if (ent.isDirectory()) {
-      const html = path.join(abs, "index.html");
-      const md = path.join(abs, "index.md");
-      const entryAbs = fs.existsSync(html) ? html : fs.existsSync(md) ? md : undefined;
-      if (entryAbs) {
-        const rel = toPosix(path.relative(root, entryAbs));
-        const type = inferType(rel);
-        artifacts.push(makeLocalArtifact(projectId, ent.name, type, rel, entryAbs));
-      }
-      // Sibling .html / .md files in the same dir become additional artifacts
-      // named `<dir>/<file>`, so multiple artifacts can share supporting
-      // assets (css, images) in the same dir.
       let sub: fs.Dirent[];
       try {
         sub = fs.readdirSync(abs, { withFileTypes: true });
       } catch {
         sub = [];
       }
+      // The index entry's contentHash folds in every sibling's mtime+size so
+      // that updating an asset (image, css) referenced via a relative URL
+      // bumps the iframe's cache-busting key, even though the index file
+      // itself hasn't changed.
+      const dirSig = directorySignature(abs, sub);
+      const html = path.join(abs, "index.html");
+      const md = path.join(abs, "index.md");
+      const entryAbs = fs.existsSync(html) ? html : fs.existsSync(md) ? md : undefined;
+      if (entryAbs) {
+        const rel = toPosix(path.relative(root, entryAbs));
+        const type = inferType(rel);
+        artifacts.push(makeLocalArtifact(projectId, ent.name, type, rel, entryAbs, dirSig));
+      }
+      // Sibling .html / .md files in the same dir become additional artifacts
+      // named `<dir>/<file>`, so multiple artifacts can share supporting
+      // assets (css, images) in the same dir.
       for (const f of sub) {
         if (!f.isFile()) continue;
         if (f.name.startsWith(".")) continue;
@@ -261,6 +266,7 @@ function makeLocalArtifact(
   type: ArtifactType,
   entry: string,
   absPath: string,
+  contentHashOverride?: string,
 ): LocalArtifact {
   const stat = fs.statSync(absPath);
   const artifactId = localArtifactId(projectId, entry);
@@ -269,7 +275,7 @@ function makeLocalArtifact(
     name,
     type,
     revision: 1,
-    contentHash: `local:${stat.mtimeMs}:${stat.size}`,
+    contentHash: contentHashOverride ?? `local:${stat.mtimeMs}:${stat.size}`,
     size: stat.size,
     createdAt: stat.mtime.toISOString(),
     local: true,
@@ -342,6 +348,23 @@ export function openBrowser(url: string): void {
 
 function localArtifactId(projectId: string, entry: string): string {
   return "local_" + createHash("sha256").update(`${projectId}\0${entry}`).digest("hex").slice(0, 16);
+}
+
+function directorySignature(absDir: string, entries: fs.Dirent[]): string {
+  const hash = createHash("sha256");
+  const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
+  for (const e of sorted) {
+    if (!e.isFile()) continue;
+    if (e.name.startsWith(".")) continue;
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(path.join(absDir, e.name));
+    } catch {
+      continue;
+    }
+    hash.update(`${e.name}\0${st.mtimeMs}\0${st.size}\n`);
+  }
+  return `local-dir:${hash.digest("hex").slice(0, 32)}`;
 }
 
 function toPosix(p: string): string {
