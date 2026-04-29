@@ -6,3 +6,4 @@ viewer/node_modules
 *.tsbuildinfo
 .DS_Store
 tmp
+.agentuse/artifacts
