@@ -6,4 +6,6 @@ viewer/node_modules
 *.tsbuildinfo
 .DS_Store
 tmp
+# Local dev fixtures generated while hacking on this tool.
+# Consumers of @agentuse/artifacts should commit their own .agentuse/artifacts/.
 .agentuse/artifacts
