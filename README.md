@@ -11,6 +11,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/npm/l/@agentuse/artifacts.svg?color=blue" alt="license"></a>
 </p>
 
+<p align="center">
+  <img src="screenshot.png" alt="@agentuse/artifacts viewer screenshot" width="900">
+</p>
+
 ---
 
 Agents are great at producing things: plans, reports, dashboards, scratchpads, designs. They are bad at giving you a place to read them. The interesting deliverable usually ends up buried in a transcript, overwritten by the next run, or saved to a random path nobody ever opens.
