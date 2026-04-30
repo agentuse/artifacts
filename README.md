@@ -19,10 +19,12 @@
 
 Agents are great at producing things: plans, reports, dashboards, scratchpads, designs. They are bad at giving you a place to read them. The interesting deliverable usually ends up buried in a transcript, overwritten by the next run, or saved to a random path nobody ever opens.
 
+I kept hitting the same wall: the agent would finish a task, drop a file somewhere, and I'd have no idea where. I'd scroll back through the transcript looking for the path, copy it into Finder or `cat`, realize it was an HTML file that needed a browser, open it manually, then do the same dance for the next artifact ten minutes later. Half the value of what the agent produced was lost to friction. I built this so the answer to "where did it go?" is always the same: it's in the viewer, alongside everything else the agent has ever made.
+
 `@agentuse/artifacts` is a tiny piece of plumbing for that gap. It ships as:
 
 1. **A Claude Code Skill** that teaches the agent where to save artifacts and how to lay them out.
-2. **A local web viewer** that auto-discovers those artifacts across all your projects and renders them, including sandboxed HTML.
+2. **A local web viewer** that auto-discovers those artifacts across all your projects and renders them, including sandboxed HTML. The viewer lays each project out as a pannable, zoomable canvas so you can scan a dozen reports at once, zoom into the one that matters, and skim siblings without bouncing through nested folders or tabs.
 3. **A CLI** under the hood, in case you want to wire it into other harnesses (Codex, Cursor, your own runner, CI).
 
 Most users only ever interact with #1 and #2. The agent does the rest.
