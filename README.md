@@ -15,8 +15,6 @@
   <img src="screenshot.png" alt="@agentuse/artifacts viewer screenshot" width="900">
 </p>
 
----
-
 Agents are great at producing things: plans, reports, dashboards, scratchpads, designs. They are bad at giving you a place to read them. The interesting deliverable usually ends up buried in a transcript, overwritten by the next run, or saved to a random path nobody ever opens.
 
 I kept hitting the same wall: the agent would finish a task, drop a file somewhere, and I'd have no idea where. I'd scroll back through the transcript looking for the path, copy it into Finder or `cat`, realize it was an HTML file that needed a browser, open it manually, then do the same dance for the next artifact ten minutes later. Half the value of what the agent produced was lost to friction. I built this so the answer to "where did it go?" is always the same: it's in the viewer, alongside everything else the agent has ever made.
@@ -28,6 +26,9 @@ I kept hitting the same wall: the agent would finish a task, drop a file somewhe
 3. **A CLI** under the hood, in case you want to wire it into other harnesses (Codex, Cursor, your own runner, CI).
 
 Most users only ever interact with #1 and #2. The agent does the rest.
+
+---
+
 
 ## Coding agents (interactive) — Claude Code, Cursor, Codex
 
@@ -98,6 +99,9 @@ Once the Skill is installed, the agent follows a single, opinionated layout:
 
 The viewer picks all of this up automatically. Open it once with `npx @agentuse/artifacts open` and you get a live SPA listing every project and every artifact, polled in real time. HTML is rendered in a sandboxed iframe with a strict CSP (more on that below).
 
+---
+
+
 ## Autonomous agents (async) — AgentUse
 
 For agents that run on a schedule or fire-and-forget without a human in the loop. This package is built for [AgentUse](https://docs.agentuse.io). AgentUse auto-discovers Skills from `.agentuse/skills/`, `~/.agentuse/skills/`, `.claude/skills/`, and `~/.claude/skills/`, so once you run `npx skills add agentuse/artifacts` (or `-g`) the Skill is wired up and exposed to every agent run via the built-in `skill` tool. No frontmatter changes required.
@@ -147,6 +151,9 @@ Common shapes that work well:
 
 Set the agent up once, walk away, and the gallery fills itself.
 
+---
+
+
 ## Chat-based agents — Hermes, Openclaw, cloud VMs
 
 For chat-driven agents that live on a remote box you talk to over the network (Nous Research's [Hermes Agent](https://hermes-agent.nousresearch.com/), [Openclaw](https://github.com/openclaw/openclaw), or any cloud VM you SSH into). Install is the same:
@@ -172,6 +179,7 @@ Need to share with someone outside your tailnet? Swap to `tailscale funnel --bg 
 
 For agent runtimes that don't yet have a `--agent` target in the [`skills`](https://github.com/vercel-labs/skills) CLI, copy `skills/agentuse-artifacts/SKILL.md` into the runtime's skill directory manually and the same workflow applies.
 
+---
 ## Use it without Claude Code or AgentUse
 
 The Skill is just a markdown file telling an agent how to behave. Everything underneath is plain CLI you can call yourself or wire into any harness.
