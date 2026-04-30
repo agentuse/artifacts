@@ -29,9 +29,9 @@ I kept hitting the same wall: the agent would finish a task, drop a file somewhe
 
 Most users only ever interact with #1 and #2. The agent does the rest.
 
-## Quick start (Claude Code)
+## Coding agents (interactive) — Claude Code, Cursor, Codex
 
-This is the path 95% of people want.
+For any interactive coding agent you drive from your editor or terminal. This is the path 95% of people want.
 
 **1. Install the Skill**
 
@@ -98,9 +98,9 @@ Once the Skill is installed, the agent follows a single, opinionated layout:
 
 The viewer picks all of this up automatically. Open it once with `npx @agentuse/artifacts open` and you get a live SPA listing every project and every artifact, polled in real time. HTML is rendered in a sandboxed iframe with a strict CSP (more on that below).
 
-## Use it with AgentUse
+## Autonomous agents (async) — AgentUse
 
-This package is built for [AgentUse](https://docs.agentuse.io). AgentUse auto-discovers Skills from `.agentuse/skills/`, `~/.agentuse/skills/`, `.claude/skills/`, and `~/.claude/skills/`, so once you run `npx skills add agentuse/artifacts` (or `-g`) the Skill is wired up and exposed to every agent run via the built-in `skill` tool. No frontmatter changes required.
+For agents that run on a schedule or fire-and-forget without a human in the loop. This package is built for [AgentUse](https://docs.agentuse.io). AgentUse auto-discovers Skills from `.agentuse/skills/`, `~/.agentuse/skills/`, `.claude/skills/`, and `~/.claude/skills/`, so once you run `npx skills add agentuse/artifacts` (or `-g`) the Skill is wired up and exposed to every agent run via the built-in `skill` tool. No frontmatter changes required.
 
 A minimal agent that produces an artifact:
 
@@ -147,9 +147,9 @@ Common shapes that work well:
 
 Set the agent up once, walk away, and the gallery fills itself.
 
-## Use it with remote agents (Hermes, Openclaw, cloud VMs)
+## Chat-based agents — Hermes, Openclaw, cloud VMs
 
-Long-running or remote agents (Nous Research's [Hermes Agent](https://hermes-agent.nousresearch.com/), [Openclaw](https://github.com/openclaw/openclaw), a cloud VM running AgentUse on cron) work the same way at install time:
+For chat-driven agents that live on a remote box you talk to over the network (Nous Research's [Hermes Agent](https://hermes-agent.nousresearch.com/), [Openclaw](https://github.com/openclaw/openclaw), or any cloud VM you SSH into). Install is the same:
 
 ```bash
 # on the box where the agent runs
