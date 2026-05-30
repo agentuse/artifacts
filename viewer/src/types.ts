@@ -33,6 +33,9 @@ export interface ArtifactRecord {
   naturalHeight?: number;
   local?: boolean;
   localEntry?: string;
+  /** POSIX path relative to the registered project root for project-wide
+   *  artifact discovery. */
+  projectRelPath?: string;
   /** Host-native on-disk path for the primary file. Set by the server for
    *  local artifacts; used by the "Copy path" action. */
   absolutePath?: string;

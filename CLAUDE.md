@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`@agentuse/artifacts`: a Node CLI plus a local web viewer for collecting markdown/HTML artifacts emitted by AI agents. Artifacts live as plain files under each project's `./.agentuse/artifacts/` directory; the CLI registers project paths in a small index at `~/.agentuse/artifacts/manifest.json` and serves the registered projects through a local React SPA.
+`@agentuse/artifacts`: a Node CLI plus a local web viewer for collecting markdown/HTML artifacts emitted by AI agents. The recommended generated-output drop zone is each project's `./.agentuse/artifacts/` directory, but the viewer discovers supported artifact files across registered projects. The CLI registers project paths in a small index at `~/.agentuse/artifacts/manifest.json` and serves the registered projects through a local React SPA.
 
 ## Commands
 
@@ -29,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two layers, both filesystem-backed:
 
-1. **Per-project artifacts** live in each registered project at `<project>/.agentuse/artifacts/<name>/index.{md,html}` (with sibling support files). These are normal files the user/agent edits directly; the server scans them on every request.
+1. **Per-project artifacts** are supported files in each registered project (`.md/.markdown`, `.html/.htm`, `.png/.jpg/.jpeg/.webp`, `.pdf`). Generated agent output should still live at `<project>/.agentuse/artifacts/<name>/index.{md,html}` (with sibling support files), but existing project docs/screenshots/reports are discovered in place. Dependency, build, cache, temp, VCS, and hidden config directories are ignored, except `.agentuse/artifacts/`.
 2. **Cross-project index** lives under `rootDir()` (default `~/.agentuse/artifacts/`, overridable via `AGENTUSE_ARTIFACTS_HOME`):
    - `manifest.json` - the project registry: `projects: Record<projectId, { name, path, createdAt, updatedAt? }>`. Schema versioned (`SCHEMA_VERSION = 1`). The runtime `Manifest` type still carries `runs`/`artifacts`/`latest` because `buildLocalManifest()` populates them on every `/api/manifest` response from the on-disk scan; only `projects` is persisted.
    - `.lock` - advisory lock file for cross-process registry writes.
@@ -56,12 +56,11 @@ This is why moving a project directory keeps its artifacts; rewriting git histor
 
 ### Listing semantics (`src/localArtifacts.ts`)
 
-`listLocalArtifactsForProject()` walks each registered project's `.agentuse/artifacts/` directory:
-- A subdirectory containing `index.html` or `index.md` becomes one artifact named `<dir>`.
-- Sibling `.html`/`.md` files in that subdirectory become additional artifacts named `<dir>/<file>` so multiple artifacts can share supporting assets (css, images) in the same dir.
-- Top-level `.html`/`.md` files are listed as well; non-artifact files at the root are ignored.
-- Each artifact gets a synthetic `artifactId = "local_" + sha256(projectId + "\0" + entry).slice(0, 16)` so the viewer can address it stably across reloads.
-- The synthetic `contentHash` for a directory entry folds in every sibling's `mtimeMs+size` so the viewer's iframe cache-busts when an asset (image, css) referenced via a relative URL is updated, even though the index file itself hasn't changed.
+`listLocalArtifactsForProject()` now merges two scans:
+- First, it walks each registered project's `.agentuse/artifacts/` directory with legacy semantics: a subdirectory containing `index.html` or `index.md` becomes one artifact named `<dir>`, sibling `.html`/`.md` files become `<dir>/<file>`, and IDs keep using the artifact-root-relative entry so old URLs remain stable.
+- Then it recursively scans the registered project for supported artifact files, skipping dependency/build/cache/temp/VCS/hidden config paths. Project-wide files use `projectRelPath` for serving and IDs are namespaced with `project:` to avoid collisions.
+- `ArtifactRecord.localEntry` remains artifact-root-relative and only exists for legacy `.agentuse/artifacts/` files. `ArtifactRecord.projectRelPath` is project-root-relative and is available for all discovered project-local files.
+- The synthetic `contentHash` for a legacy directory entry still folds in every sibling's `mtimeMs+size` so the viewer's iframe cache-busts when an asset (image, css) referenced via a relative URL is updated, even though the index file itself hasn't changed.
 
 ### Viewer server (`src/server.ts`)
 
@@ -70,7 +69,8 @@ Routes:
 - `/api/artifact/:artifactId` -> markdown / image / pdf bytes for the artifact ID. HTML artifacts are rejected here (400); use `/api/render/:id`.
 - `/api/raw/:artifactId` -> original file bytes as `application/octet-stream` with `Content-Disposition: attachment` (powers Download / Copy actions; never rendered inline).
 - `/api/render/:artifactId` -> sanitized HTML as `text/html` with its own `Content-Security-Policy` and `X-Frame-Options: SAMEORIGIN` response headers. The SPA loads this via `<iframe src="/api/render/:id" sandbox="allow-scripts">`. Going through `src=` (not `srcdoc`) is what lets the artifact have its own CSP — srcdoc inherits the parent SPA CSP, `src=` does not.
-- `/api/project-artifacts/:projectId/:path...` -> serves files inside `<project>/.agentuse/artifacts/` directly so HTML artifacts can resolve relative URLs (css, images) against their own directory. HTML is sanitized; other types pass through with a type-appropriate CSP.
+- `/api/project-artifacts/:projectId/:path...` -> legacy route serving files inside `<project>/.agentuse/artifacts/` directly so existing HTML artifacts can resolve relative URLs. HTML is sanitized; other types pass through with a type-appropriate CSP.
+- `/api/project-files/:projectId/:path...` -> project-root route for whole-project discovery. It rejects ignored paths and unsupported extensions so the viewer does not become a general-purpose source/config file server. HTML is sanitized; safe support files such as CSS/images/fonts pass through with type-appropriate headers.
 - Everything else falls back to `viewer-dist/index.html` for SPA routes (`/p/:projectId`, `/p/:projectId/a/:name`, `/p/:projectId/a/:name/f/:expandedId`, etc.).
 
 Server lifecycle:
@@ -103,7 +103,7 @@ When modifying sanitization: do not switch to regex; do not relax `connect-src` 
 
 - React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `navRoute` over `window.location` in `App.tsx`. Path shape: `/p/:projectId[/a/:name[/v/:rev]][/f/:expandedId]?d=1`. The `r/:runId` and `v/:rev` segments still parse for backward-compat with bookmarked URLs, but local-fs artifacts always have one revision and no run tag.
 - Manifest is polled every 2s from `/api/manifest`. There is no websocket or SSE.
-- HTML artifacts render via `<iframe src="/api/render/:id" sandbox="allow-scripts">`. Markdown is fetched from `/api/artifact/:id` and rendered with `react-markdown` + `remark-gfm` + `rehype-highlight`.
+- HTML artifacts render via `<iframe src="/api/render/:id" sandbox="allow-scripts">` for ID-based fallback, or through project-local file routes when a project-relative path is available. Markdown is fetched from the corresponding local file route or `/api/artifact/:id` and rendered with `react-markdown` + `remark-gfm` + `rehype-highlight`.
 - `react-zoom-pan-pinch` powers the canvas pan/zoom. If you touch gestures here, mind the conflict between iframe scrolling and the parent pan handler.
 
 ## Conventions specific to this repo

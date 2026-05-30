@@ -232,10 +232,23 @@ html, body, #root {
   word-break: break-all;
 }
 
+.list-section {
+  padding: 13px 16px 7px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--pane-bg-elev);
+}
+
 .group-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 10px 16px 6px;
   font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 10.5px;
@@ -264,6 +277,55 @@ html, body, #root {
 }
 .group-head.selected .group-count {
   color: var(--accent);
+}
+.tree-folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--pane-bg);
+  cursor: pointer;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  transition: background 120ms ease, color 120ms ease;
+}
+.tree-folder:hover {
+  background: var(--pane-bg-elev);
+  color: var(--fg);
+}
+.tree-folder.selected {
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent);
+  color: var(--accent);
+}
+.tree-folder .group-count,
+.group-head .group-count {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.tree-twist {
+  flex: 0 0 10px;
+  width: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+.tree-label,
+.tree-primary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-label {
+  flex: 1 1 auto;
+}
+.tree-file {
+  min-width: 0;
 }
 .list-item.in-group {
   padding-left: 28px;

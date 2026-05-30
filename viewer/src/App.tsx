@@ -3,7 +3,7 @@ import { Menu, X } from "lucide-react";
 import { fetchManifest } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
-import { ArtifactList, groupKeyOf, latestGroupFor } from "./components/ArtifactList";
+import { ArtifactList, artifactMatchesGroup, latestGroupFor } from "./components/ArtifactList";
 import { Canvas } from "./components/Canvas";
 import { loadSort, saveSort, type SortMode } from "./sort";
 
@@ -116,7 +116,7 @@ export function App() {
       .map((id) => [id, manifest.artifacts[id]] as [string, ArtifactRecord | undefined])
       .filter((e): e is [string, ArtifactRecord] => !!e[1]);
     if (route.group != null) {
-      return latest.filter(([, a]) => groupKeyOf(a) === route.group);
+      return latest.filter(([, a]) => artifactMatchesGroup(a, route.group!));
     }
     return latest;
   }, [manifest, route.projectId, route.artifactName, route.group]);

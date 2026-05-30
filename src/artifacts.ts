@@ -1,7 +1,7 @@
 // Viewer URL helpers. The artifact store itself lives in each project's
-// `./.agentuse/artifacts/` directory and is scanned on demand by
-// `src/localArtifacts.ts`; the CLI no longer ingests blobs into a central
-// manifest store.
+// registered project and are scanned on demand by `src/localArtifacts.ts`;
+// `./.agentuse/artifacts/` remains the recommended generated-output drop
+// zone. The CLI no longer ingests blobs into a central manifest store.
 
 export interface ViewerLocation {
   port: number;

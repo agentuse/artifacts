@@ -104,7 +104,7 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .command("list")
-    .description("List project-local artifacts in .agentuse/artifacts")
+    .description("List supported artifacts discovered in the current project")
     .action(() => {
       const global = program.opts<GlobalOpts>();
       try {
@@ -119,18 +119,19 @@ export async function runCli(argv: string[]): Promise<void> {
               name: a.record.name,
               type: a.record.type,
               entry: a.entry,
+              projectRelPath: a.projectRelPath,
               size: a.record.size,
             })),
           },
           () => {
             if (!out.artifacts.length) {
-              human(`No local artifacts found in ${out.artifactsDir}`);
-              human("Run `artifacts init`, then save files under .agentuse/artifacts/.");
+              human(`No supported artifacts found in ${out.project.path}`);
+              human("Supported files include markdown, HTML, images, and PDFs.");
               return;
             }
             human(`Artifacts in ${out.project.name}:`);
             for (const a of out.artifacts) {
-              human(`  ${a.record.name}  ${a.record.type}  ${fmtSize(a.record.size)}  ${a.entry}`);
+              human(`  ${a.record.name}  ${a.record.type}  ${fmtSize(a.record.size)}  ${a.projectRelPath}`);
             }
           },
         );

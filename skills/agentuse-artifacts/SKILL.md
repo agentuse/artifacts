@@ -1,13 +1,13 @@
 ---
 name: agentuse-artifacts
-description: Save substantial markdown/HTML deliverables as project-local, viewable artifacts using @agentuse/artifacts. Related outputs from the same task should be grouped into one folder under ./.agentuse/artifacts/ so the viewer canvas shows them together. Use proactively whenever you generate a report, plan, spec, HTML page, dashboard, chart, or rendered document the user will want to preview in a browser. Also triggers on "save as artifact", "preview this", "render this", "make it viewable", "artifact".
+description: Save substantial markdown/HTML deliverables as project-local, viewable artifacts using @agentuse/artifacts. Generated outputs should usually be grouped under ./.agentuse/artifacts/, while existing supported project files can be viewed in place. Use proactively whenever you generate or identify a report, plan, spec, HTML page, dashboard, chart, or rendered document the user will want to preview in a browser. Also triggers on "save as artifact", "preview this", "render this", "make it viewable", "artifact".
 ---
 
 # agentuse-artifacts
 
-Use `@agentuse/artifacts` to save AI-generated deliverables into a project-local artifact directory and preview them in the local viewer.
+Use `@agentuse/artifacts` to save AI-generated deliverables into a project-local artifact directory and preview generated or existing project files in the local viewer.
 
-Primary model: create one folder per artifact group under `./.agentuse/artifacts/`. If multiple outputs come from the same task, topic, report, or deliverable package, put them in the same folder so the viewer canvas shows them together. Single standalone outputs can still use their own folder.
+Primary model for newly generated outputs: create one folder per artifact group under `./.agentuse/artifacts/`. If multiple outputs come from the same task, topic, report, or deliverable package, put them in the same folder so the viewer canvas shows them together. Single standalone outputs can still use their own folder.
 
 ```txt
 <project>/.agentuse/artifacts/
@@ -23,7 +23,7 @@ Primary model: create one folder per artifact group under `./.agentuse/artifacts
     chart.png
 ```
 
-Artifacts are normal project files. Support files work through relative paths.
+Artifacts are normal project files. The viewer also discovers supported files that already live elsewhere in the registered project, so do not copy an existing `docs/report.md`, `screenshots/flow.png`, or similar project file just to make it visible. Support files work through relative paths.
 
 ## When to use this
 
@@ -107,6 +107,16 @@ Most commands accept `--json`.
 - Project files are never deleted by registry commands.
 - HTML is sanitized when rendered; keep using relative files for local CSS/images.
 
+## Existing project files
+
+When the user asks to "send", "save", or "preview" an existing project file as an artifact (e.g. `/agentuse-artifacts send path/to/foo.md`), treat the original file as the source of truth and leave it in place. The viewer scans supported files across the registered project, so a copy under `.agentuse/artifacts/<group>/` is no longer required for plain Markdown, HTML, PNG/JPG/WebP, or PDF files.
+
+Rules:
+- Do not move, delete, or duplicate an existing supported project file just to make it viewable.
+- If the file is already in a supported format, register/open the project and point the user to the viewer.
+- If the project file needs a derived artifact (for example, rendering a Markdown source into a richer HTML dashboard), write the derived output under `.agentuse/artifacts/<group>/` and say which original file it came from.
+- If the user edits the original source later, update only the source unless there is an intentional derived artifact that must be regenerated.
+
 ## Command reference
 
 | Command | Purpose |
@@ -114,7 +124,7 @@ Most commands accept `--json`.
 | `init` | Create `./.agentuse/artifacts/` and register current project. Safe to rerun. |
 | `open [--port N] [--detach] [--no-browser]` | Register current project, ensure viewer is running, and open/print URL. |
 | `serve [--port N] [--detach] [--stop] [--fail-if-running]` | Start/stop/reuse viewer server only. No cwd registration. |
-| `list` | List local artifacts in current project's `./.agentuse/artifacts/`. |
+| `list` | List supported artifacts discovered in the current project. |
 | `project list` | List registered projects. |
 | `project add [dir]` | Register a project directory and create its `.agentuse/artifacts` folder. |
 | `project forget <projectId\|path>` | Remove project from registry only; does not delete files. |
@@ -293,7 +303,7 @@ This only removes the registry entry. It does not delete `.agentuse/artifacts` f
 
 ## Safety notes
 
-- Do not save artifacts outside `./.agentuse/artifacts/` unless the user explicitly asks for another location.
+- Save newly generated artifact packages under `./.agentuse/artifacts/` by default. Existing supported project files can stay where they already live.
 - Use relative asset paths in HTML/markdown.
 - Do not tell users that `project prune` deletes files; it only forgets missing project registry entries.
 - Prefer `open` when the user wants to view the artifact; prefer `serve` only when managing the server itself.

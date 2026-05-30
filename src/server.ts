@@ -10,6 +10,7 @@ import {
   buildLocalManifest,
   findLocalArtifactById,
   resolveLocalProjectFile,
+  resolveProjectFile,
 } from "./localArtifacts.js";
 
 export const DEFAULT_PORT = 7878;
@@ -117,6 +118,33 @@ const BINARY_MIME: Record<string, string> = {
   webp: "image/webp",
   pdf: "application/pdf",
 };
+
+const PROJECT_FILE_EXTENSIONS = new Set([
+  ".html",
+  ".htm",
+  ".md",
+  ".markdown",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".pdf",
+  ".css",
+  ".svg",
+  ".ico",
+  ".woff2",
+  ".woff",
+  ".ttf",
+  ".otf",
+]);
+
+function projectFileCsp(ext: string): string | null | undefined {
+  if (ext === ".pdf") return null;
+  if (ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp" || ext === ".svg") {
+    return IMAGE_CSP;
+  }
+  return undefined;
+}
 
 function serveStatic(res: http.ServerResponse, dir: string, file: string): void {
   const ext = path.extname(file).toLowerCase();
@@ -281,6 +309,58 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
         fs.readFileSync(abs),
         { "content-type": MIME[ext] ?? "application/octet-stream" },
         { csp },
+      );
+    } catch (e) {
+      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
+      send(res, code, (e as Error).message);
+    }
+    return;
+  }
+
+  // /api/project-files/{projectId}/{path...} -> project-local live files
+  // rooted at the registered project. This powers whole-project discovery
+  // while avoiding a general-purpose file server: ignored paths and
+  // unsupported extensions are rejected before bytes are returned.
+  const projectFileMatch = /^\/api\/project-files\/([A-Za-z0-9_]+)\/(.*)$/.exec(pathname);
+  if (projectFileMatch) {
+    const projectId = projectFileMatch[1]!;
+    const relInput = projectFileMatch[2]!;
+    try {
+      const file = resolveProjectFile(projectId, relInput);
+      let abs = file.absPath;
+      if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+        const indexHtml = path.join(abs, "index.html");
+        const indexMd = path.join(abs, "index.md");
+        abs = fs.existsSync(indexHtml) ? indexHtml : indexMd;
+      }
+      if (!abs || !fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
+        send(res, 404, "not found");
+        return;
+      }
+      const ext = path.extname(abs).toLowerCase();
+      if (!PROJECT_FILE_EXTENSIONS.has(ext)) {
+        send(res, 404, "not found");
+        return;
+      }
+      if (ext === ".html" || ext === ".htm") {
+        const safe = buildSafeSrcdoc(fs.readFileSync(abs, "utf8"));
+        send(res, 200, safe, {
+          "content-type": "text/html; charset=utf-8",
+          "content-security-policy": META_CSP,
+          "x-frame-options": "SAMEORIGIN",
+        });
+        return;
+      }
+      if (ext === ".md" || ext === ".markdown") {
+        send(res, 200, fs.readFileSync(abs), { "content-type": "text/markdown; charset=utf-8" });
+        return;
+      }
+      send(
+        res,
+        200,
+        fs.readFileSync(abs),
+        { "content-type": MIME[ext] ?? "application/octet-stream" },
+        { csp: projectFileCsp(ext) },
       );
     } catch (e) {
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;

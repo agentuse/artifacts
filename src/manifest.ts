@@ -35,14 +35,16 @@ export interface ArtifactRecord {
    *  bump. */
   naturalWidth?: number;
   naturalHeight?: number;
-  /** Project-local live artifact fields. localEntry is the path under
-   *  <project>/.agentuse/artifacts/ (POSIX separators). absolutePath is the
-   *  resolved on-disk path for the artifact's primary file (host-native
-   *  separators) so the viewer can offer "copy path" without reconstructing
-   *  it client-side. Only set for local artifacts; never persisted into the
-   *  on-disk manifest (buildLocalManifest fills it on every read). */
+  /** Project-local live artifact fields. projectRelPath is the primary file's
+   *  path relative to the project root (POSIX separators). localEntry is still
+   *  set for artifacts under <project>/.agentuse/artifacts/ and remains
+   *  relative to that artifact root for backwards-compatible URLs/grouping.
+   *  absolutePath is host-native so the viewer can offer "copy path" without
+   *  reconstructing it client-side. These fields are never persisted into the
+   *  on-disk manifest (buildLocalManifest fills them on every read). */
   local?: boolean;
   localEntry?: string;
+  projectRelPath?: string;
   absolutePath?: string;
 }
 
@@ -208,4 +210,3 @@ export async function withLock<T>(fn: () => Promise<T> | T): Promise<T> {
     release();
   }
 }
-

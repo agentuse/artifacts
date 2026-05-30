@@ -5,7 +5,7 @@ import rehypeHighlight from "rehype-highlight";
 import { fetchArtifact } from "../api";
 import type { ArtifactRecord } from "../types";
 
-function encodeLocalEntry(entry: string): string {
+function encodePath(entry: string): string {
   return entry.split("/").map(encodeURIComponent).join("/");
 }
 
@@ -20,8 +20,10 @@ function cacheBust(url: string, record: ArtifactRecord): string {
 
 function artifactUrl(artifactId: string, record: ArtifactRecord): string {
   const base = record.local && record.localEntry
-    ? `/api/project-artifacts/${encodeURIComponent(record.projectId)}/${encodeLocalEntry(record.localEntry)}`
-    : `/api/artifact/${artifactId}`;
+    ? `/api/project-artifacts/${encodeURIComponent(record.projectId)}/${encodePath(record.localEntry)}`
+    : record.local && record.projectRelPath
+      ? `/api/project-files/${encodeURIComponent(record.projectId)}/${encodePath(record.projectRelPath)}`
+      : `/api/artifact/${artifactId}`;
   return cacheBust(base, record);
 }
 

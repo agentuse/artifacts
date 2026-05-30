@@ -10,12 +10,39 @@ import { inferType, type ArtifactType } from "./validation.js";
 import { readImageDims } from "./imageDims.js";
 
 export const LOCAL_ARTIFACTS_REL = path.join(".agentuse", "artifacts");
+const LOCAL_ARTIFACTS_POSIX = ".agentuse/artifacts";
+const PROJECT_FILE_ID_PREFIX = "project:";
+
+const IGNORED_PROJECT_DIR_NAMES = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  "bower_components",
+  "dist",
+  "viewer-dist",
+  "build",
+  "out",
+  "coverage",
+  "target",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  ".vite",
+  ".turbo",
+  ".cache",
+  "__pycache__",
+  "tmp",
+  "temp",
+  "logs",
+]);
 
 export interface LocalArtifact {
   artifactId: string;
   record: ArtifactRecord;
   entry: string;
   absPath: string;
+  projectRelPath: string;
 }
 
 export function projectLocalArtifactsDir(projectPath: string): string {
@@ -193,6 +220,27 @@ export function listLocalArtifactsForProject(
   projectId: string,
   project: ProjectRecord,
 ): LocalArtifact[] {
+  const artifacts: LocalArtifact[] = [];
+  const seenAbsPaths = new Set<string>();
+  const seenNames = new Set<string>();
+
+  for (const artifact of listArtifactRootArtifacts(projectId, project)) {
+    artifacts.push(artifact);
+    seenAbsPaths.add(canonicalPath(artifact.absPath));
+    seenNames.add(artifact.record.name);
+  }
+
+  for (const artifact of listProjectFileArtifacts(projectId, project, seenAbsPaths, seenNames)) {
+    artifacts.push(artifact);
+  }
+
+  return artifacts.sort((a, b) => a.record.name.localeCompare(b.record.name));
+}
+
+function listArtifactRootArtifacts(
+  projectId: string,
+  project: ProjectRecord,
+): LocalArtifact[] {
   const root = projectLocalArtifactsDir(project.path);
   if (!fs.existsSync(root)) return [];
   let entries: fs.Dirent[];
@@ -224,7 +272,18 @@ export function listLocalArtifactsForProject(
       if (entryAbs) {
         const rel = toPosix(path.relative(root, entryAbs));
         const type = inferType(rel);
-        artifacts.push(makeLocalArtifact(projectId, ent.name, type, rel, entryAbs, dirSig));
+        artifacts.push(
+          makeLocalArtifact({
+            projectId,
+            name: ent.name,
+            type,
+            entry: rel,
+            localEntry: rel,
+            projectRelPath: toPosix(path.relative(project.path, entryAbs)),
+            absPath: entryAbs,
+            contentHashOverride: dirSig,
+          }),
+        );
       }
       // Sibling .html / .md files in the same dir become additional artifacts
       // named `<dir>/<file>`, so multiple artifacts can share supporting
@@ -242,7 +301,17 @@ export function listLocalArtifactsForProject(
         if (type !== "html" && type !== "markdown") continue;
         const rel = toPosix(path.join(ent.name, f.name));
         const fAbs = path.join(abs, f.name);
-        artifacts.push(makeLocalArtifact(projectId, rel, type, rel, fAbs));
+        artifacts.push(
+          makeLocalArtifact({
+            projectId,
+            name: rel,
+            type,
+            entry: rel,
+            localEntry: rel,
+            projectRelPath: toPosix(path.relative(project.path, fAbs)),
+            absPath: fAbs,
+          }),
+        );
       }
       continue;
     }
@@ -250,37 +319,124 @@ export function listLocalArtifactsForProject(
     try {
       const type = inferType(ent.name);
       const rel = toPosix(ent.name);
-      artifacts.push(makeLocalArtifact(projectId, ent.name, type, rel, abs));
+      artifacts.push(
+        makeLocalArtifact({
+          projectId,
+          name: ent.name,
+          type,
+          entry: rel,
+          localEntry: rel,
+          projectRelPath: toPosix(path.relative(project.path, abs)),
+          absPath: abs,
+        }),
+      );
     } catch {
       // Non-artifact support files at the root are ignored.
     }
   }
 
-  return artifacts.sort((a, b) => a.record.name.localeCompare(b.record.name));
+  return artifacts;
 }
 
-function makeLocalArtifact(
+function listProjectFileArtifacts(
   projectId: string,
-  name: string,
-  type: ArtifactType,
-  entry: string,
-  absPath: string,
-  contentHashOverride?: string,
-): LocalArtifact {
+  project: ProjectRecord,
+  seenAbsPaths: Set<string>,
+  seenNames: Set<string>,
+): LocalArtifact[] {
+  const root = project.path;
+  const artifacts: LocalArtifact[] = [];
+  const stack: Array<{ absDir: string; relDir: string }> = [{ absDir: root, relDir: "" }];
+
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(cur.absDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const ent of entries) {
+      const abs = path.join(cur.absDir, ent.name);
+      const rel = toPosix(cur.relDir ? path.join(cur.relDir, ent.name) : ent.name);
+
+      if (ent.isDirectory()) {
+        if (isAllowedProjectScanDir(rel)) stack.push({ absDir: abs, relDir: rel });
+        continue;
+      }
+      if (!ent.isFile()) continue;
+      if (!isAllowedProjectRelPath(rel)) continue;
+
+      let type: ArtifactType;
+      try {
+        type = inferType(rel);
+      } catch {
+        continue;
+      }
+
+      const absKey = canonicalPath(abs);
+      if (seenAbsPaths.has(absKey)) continue;
+      seenAbsPaths.add(absKey);
+
+      const name = uniqueProjectArtifactName(rel, seenNames);
+      seenNames.add(name);
+      artifacts.push(
+        makeLocalArtifact({
+          projectId,
+          name,
+          type,
+          entry: rel,
+          projectRelPath: rel,
+          absPath: abs,
+          idEntry: PROJECT_FILE_ID_PREFIX + rel,
+        }),
+      );
+    }
+  }
+
+  return artifacts;
+}
+
+function uniqueProjectArtifactName(preferred: string, seenNames: Set<string>): string {
+  if (!seenNames.has(preferred)) return preferred;
+  let name = `./${preferred}`;
+  let n = 2;
+  while (seenNames.has(name)) {
+    name = `./${preferred} (${n})`;
+    n += 1;
+  }
+  return name;
+}
+
+function makeLocalArtifact(opts: {
+  projectId: string;
+  name: string;
+  type: ArtifactType;
+  entry: string;
+  projectRelPath: string;
+  absPath: string;
+  localEntry?: string;
+  idEntry?: string;
+  contentHashOverride?: string;
+}): LocalArtifact {
+  const { projectId, name, type, entry, projectRelPath, absPath, localEntry } = opts;
   const stat = fs.statSync(absPath);
-  const artifactId = localArtifactId(projectId, entry);
+  const artifactId = localArtifactId(projectId, opts.idEntry ?? entry);
   const record: ArtifactRecord = {
     projectId,
     name,
     type,
     revision: 1,
-    contentHash: contentHashOverride ?? `local:${stat.mtimeMs}:${stat.size}`,
+    contentHash: opts.contentHashOverride ?? `local:${stat.mtimeMs}:${stat.size}`,
     size: stat.size,
     createdAt: stat.mtime.toISOString(),
     local: true,
-    localEntry: entry,
+    projectRelPath,
     absolutePath: absPath,
   };
+  if (localEntry) record.localEntry = localEntry;
   if (type === "png" || type === "jpg" || type === "webp") {
     try {
       const dims = readImageDims(type, fs.readFileSync(absPath));
@@ -292,7 +448,7 @@ function makeLocalArtifact(
       // ignore malformed image headers in listings
     }
   }
-  return { artifactId, record, entry, absPath };
+  return { artifactId, record, entry, absPath, projectRelPath };
 }
 
 export function findLocalArtifactById(artifactId: string): LocalArtifact | undefined {
@@ -339,6 +495,30 @@ export function resolveLocalProjectFile(projectId: string, relInput: string): {
   return { project, root, absPath, relPath: toPosix(relPath) };
 }
 
+export function resolveProjectFile(projectId: string, relInput: string): {
+  project: ProjectRecord;
+  root: string;
+  absPath: string;
+  relPath: string;
+} {
+  const project = readManifest().projects[projectId];
+  if (!project) throw new CliError("INVALID_INPUT", `project not found: ${projectId}`);
+
+  const relPath = decodeArtifactPath(relInput);
+  if (!isAllowedProjectRelPath(relPath)) {
+    throw new CliError("INVALID_INPUT", "project file path is ignored");
+  }
+
+  const root = project.path;
+  const parts = relPath.split("/");
+  const absPath = path.resolve(root, ...parts);
+  const rootAbs = path.resolve(root);
+  if (absPath !== rootAbs && !absPath.startsWith(rootAbs + path.sep)) {
+    throw new CliError("INVALID_INPUT", "project file path escapes project root");
+  }
+  return { project, root, absPath, relPath };
+}
+
 export function openBrowser(url: string): void {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
@@ -348,6 +528,60 @@ export function openBrowser(url: string): void {
 
 function localArtifactId(projectId: string, entry: string): string {
   return "local_" + createHash("sha256").update(`${projectId}\0${entry}`).digest("hex").slice(0, 16);
+}
+
+function decodeArtifactPath(relInput: string): string {
+  let relPath: string;
+  try {
+    relPath = decodeURIComponent(relInput);
+  } catch {
+    throw new CliError("INVALID_INPUT", "bad artifact path encoding");
+  }
+  relPath = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!relPath || /[\x00-\x1f\x7f]/.test(relPath)) {
+    throw new CliError("INVALID_INPUT", "bad artifact path");
+  }
+  const parts = relPath.split("/");
+  if (parts.some((p) => p === ".." || p === "")) {
+    throw new CliError("INVALID_INPUT", "artifact path must not contain '..' or empty segments");
+  }
+  return toPosix(relPath);
+}
+
+export function isAllowedProjectRelPath(relPath: string): boolean {
+  const normalized = toPosix(relPath).replace(/^\/+/, "");
+  if (!normalized) return false;
+  if (normalized === ".agentuse") return false;
+  if (
+    normalized.startsWith(".agentuse/") &&
+    normalized !== LOCAL_ARTIFACTS_POSIX &&
+    !normalized.startsWith(LOCAL_ARTIFACTS_POSIX + "/")
+  ) {
+    return false;
+  }
+  const parts = normalized.split("/");
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i]!;
+    const segmentRel = parts.slice(0, i + 1).join("/");
+    if (isWithinLocalArtifacts(segmentRel)) continue;
+    if (segmentRel.startsWith(".agentuse/")) return false;
+    if (part.startsWith(".")) return false;
+    if (IGNORED_PROJECT_DIR_NAMES.has(part)) return false;
+  }
+  return true;
+}
+
+function isAllowedProjectScanDir(relPath: string): boolean {
+  const normalized = toPosix(relPath).replace(/^\/+/, "");
+  return normalized === ".agentuse" || isAllowedProjectRelPath(normalized);
+}
+
+function isWithinLocalArtifacts(relPath: string): boolean {
+  return (
+    relPath === LOCAL_ARTIFACTS_POSIX ||
+    relPath.startsWith(LOCAL_ARTIFACTS_POSIX + "/") ||
+    LOCAL_ARTIFACTS_POSIX.startsWith(relPath + "/")
+  );
 }
 
 function directorySignature(absDir: string, entries: fs.Dirent[]): string {

@@ -56,7 +56,7 @@ If you skip this, `npx @agentuse/artifacts` will resolve it on first use. Requir
 
 **3. That's it. Use Claude Code normally.**
 
-When the agent produces something worth keeping, it will silently save it under `./.agentuse/artifacts/<name>/index.{md,html}` and tell you how to open the viewer:
+When the agent produces something worth keeping, it will usually save it under `./.agentuse/artifacts/<name>/index.{md,html}` and tell you how to open the viewer:
 
 ```
 Saved to .agentuse/artifacts/market-analysis/index.md.
@@ -97,7 +97,7 @@ Once the Skill is installed, the agent follows a single, opinionated layout:
 - Support files (CSS, images, fonts) sit next to the entry file and load via relative paths.
 - Artifacts are normal project files. Commit them to git so the team and CI see the same outputs (recommended), or gitignore them if they're throwaway.
 
-The viewer picks all of this up automatically. Open it once with `npx @agentuse/artifacts open` and you get a live SPA listing every project and every artifact, polled in real time. HTML is rendered in a sandboxed iframe with a strict CSP (more on that below).
+The viewer picks this up automatically, and it also discovers supported artifact files anywhere else in each registered project: Markdown, HTML, PNG/JPG/WebP, and PDF. Open it once with `npx @agentuse/artifacts open` and you get a live SPA listing every project and every artifact, polled in real time. HTML is rendered in a sandboxed iframe with a strict CSP (more on that below).
 
 ---
 
@@ -191,7 +191,7 @@ cp /tmp/report.md .agentuse/artifacts/report/index.md
 npx @agentuse/artifacts open                       # boot the viewer, open the browser
 ```
 
-Any agent runner or shell script can drop files under `.agentuse/artifacts/<name>/index.{md,html}` and the viewer will pick them up automatically.
+Any agent runner or shell script can drop files under `.agentuse/artifacts/<name>/index.{md,html}` and the viewer will pick them up automatically. Existing project files with supported artifact extensions are picked up too, so a report saved at `docs/report.md` or a screenshot at `screenshots/flow.png` can be viewed without copying it into the artifact folder.
 
 If you are using a different agent runner (Codex, Cursor, Windsurf, Cline, etc.), `npx skills add agentuse/artifacts --agent <name>` will install the Skill there too. For a homegrown runner or a CI step, copy `skills/agentuse-artifacts/SKILL.md` into the system prompt and the same workflow applies.
 
@@ -204,17 +204,20 @@ Every command supports a global `--json` flag. Errors emit `{ error: { code, mes
 | `artifacts init` | Register the current directory as a project. Safe to rerun. |
 | `artifacts open [--port N] [--detach] [--no-browser]` | Start the viewer (or reuse a running one) and open the browser. |
 | `artifacts serve [--port N] [--detach] [--stop] [--fail-if-running]` | Server lifecycle only. Does not register cwd. |
-| `artifacts list` | List local artifacts under `./.agentuse/artifacts/`. |
+| `artifacts list` | List supported artifacts discovered in the current project. |
 | `artifacts url [name]` | Print a deep link to the project home, or to a specific artifact. |
 | `artifacts where` | Print the global storage path. |
 | `artifacts project list / add / forget / prune` | Manage the cross-project registry. Files are never deleted. |
 
 ## Storage layout
 
-Artifacts live in your project. The viewer's registry lives in your home dir.
+Artifacts live in your project. The dedicated `.agentuse/artifacts/` folder is still the recommended place for generated agent output, but the viewer scans the registered project for supported files and ignores dependency/build/cache/VCS directories. The viewer's registry lives in your home dir.
 
 ```
-<your-project>/.agentuse/artifacts/   # the artifacts themselves (your files)
+<your-project>/                       # scanned for supported artifact files
+  docs/report.md
+  screenshots/flow.png
+  .agentuse/artifacts/                # recommended generated-output drop zone
   <name>/index.{md,html}
   <name>/...support files
 
@@ -255,7 +258,7 @@ If you submit a PR that touches `src/sanitize.ts`, expect a careful review. Do n
         v                                v
 +----------------------------+   +-------------------+
 | Project-local artifacts    |   | HTTP server       |
-| <proj>/.agentuse/artifacts |-->| src/server.ts     |
+| <proj> supported files     |-->| src/server.ts     |
 +----------------------------+   +-------------------+
                                          |
                                          v
@@ -266,7 +269,7 @@ If you submit a PR that touches `src/sanitize.ts`, expect a careful review. Do n
 ```
 
 - Project registry mutations go through `withLock()` in `src/manifest.ts`. Atomic `tmp + fsync + rename`. Stale-lock recovery on dead pids.
-- The server scans each registered project's `.agentuse/artifacts/` on every request, so editing artifacts on disk is reflected immediately.
+- The server scans each registered project for supported artifact files on every request, so editing artifacts on disk is reflected immediately. It preserves the old `.agentuse/artifacts/` naming and IDs for compatibility.
 - The viewer SPA polls `/api/manifest` every 2s. Routing is hand-rolled over `window.location`. No router library.
 
 ## Development

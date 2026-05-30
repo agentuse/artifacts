@@ -726,7 +726,9 @@ function TileWrapper(props: TileWrapperProps) {
     >
       {showInTileHead && (
         <div className="tile-head">
-          <span className="name">{props.record.localEntry ?? props.record.name}</span>
+          <span className="name">
+            {props.record.localEntry ?? props.record.projectRelPath ?? props.record.name}
+          </span>
           <RelativeTime iso={props.record.createdAt} />
           <TileActions artifactId={props.artifactId} record={props.record} />
           {props.expanded ? (
