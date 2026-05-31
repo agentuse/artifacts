@@ -36,9 +36,9 @@ const VISIBLE_RECT_IDLE_MS = 110;
 const PAN_INERTIA_MS = 480;
 const PAN_ALIGNMENT_MS = 180;
 const PAN_VELOCITY_SENSITIVITY = 1.08;
-const WHEEL_PAN_SMOOTH_MS = 130;
-const WHEEL_PAN_SEQUENCE_MS = 180;
 const WHEEL_PAN_MULTIPLIER = 1.08;
+const SCROLL_PROXY_SIZE = 200_000;
+const SCROLL_PROXY_CENTER = SCROLL_PROXY_SIZE / 2;
 const MOVING_IDLE_MS = 220;
 // Hard floor for resize so the user can't shrink a tile to nothing and lose
 // the resize handle. Maximum is implicit (canvas can grow). The same floor
@@ -101,30 +101,7 @@ type TileExpandOrigin = {
   h: number;
 };
 
-type WheelPanTarget = {
-  x: number;
-  y: number;
-  lastAt: number;
-  frame: number | null;
-};
-
 type KeyboardDirection = "left" | "right" | "up" | "down";
-
-const CANVAS_PAN_EXCLUDED_SELECTOR = [
-  "button",
-  "a",
-  "input",
-  "textarea",
-  "select",
-  "[contenteditable='true']",
-  ".toolbar",
-  ".drawer",
-  ".tile-expanded",
-  ".tile-head",
-  ".tile-resize",
-  ".image-zoom",
-  ".action-menu-panel",
-].join(",");
 
 const CANVAS_KEYBOARD_EXCLUDED_SELECTOR = [
   "button",
@@ -145,11 +122,6 @@ function tileIntersectsRect(tile: LaidOut, rect: CanvasRect): boolean {
     tile.y < rect.bottom &&
     tile.y + tile.h > rect.top
   );
-}
-
-function canPanCanvas(wrap: HTMLElement, target: EventTarget | null): boolean {
-  if (!(target instanceof Element) || !wrap.contains(target)) return false;
-  return !target.closest(CANVAS_PAN_EXCLUDED_SELECTOR);
 }
 
 function canUseCanvasKeyboard(target: EventTarget | null): boolean {
@@ -493,13 +465,17 @@ export function Canvas(props: {
   const wrapRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const scrollProxyRef = useRef<HTMLDivElement>(null);
   const floatingHeadRef = useRef<HTMLDivElement>(null);
   const visibleFrameRef = useRef<number | null>(null);
   const visibleTimerRef = useRef<number | null>(null);
-  const wheelIdleTimerRef = useRef<number | null>(null);
   const movingTimerRef = useRef<number | null>(null);
   const closeExpandedTimerRef = useRef<number | null>(null);
-  const wheelPanTargetRef = useRef<WheelPanTarget | null>(null);
+  const shiftKeyRef = useRef(false);
+  const scrollProxyLastRef = useRef({
+    left: SCROLL_PROXY_CENTER,
+    top: SCROLL_PROXY_CENTER,
+  });
   const lastGridScaleRef = useRef<number | null>(null);
   const [visibleRect, setVisibleRect] = useState<CanvasRect | null>(null);
   const visibleRectRef = useRef<CanvasRect | null>(null);
@@ -571,14 +547,101 @@ export function Canvas(props: {
       if (visibleFrameRef.current != null) {
         cancelAnimationFrame(visibleFrameRef.current);
       }
-      if (wheelIdleTimerRef.current != null) {
-        window.clearTimeout(wheelIdleTimerRef.current);
-      }
       if (movingTimerRef.current != null) {
         window.clearTimeout(movingTimerRef.current);
       }
       if (closeExpandedTimerRef.current != null) {
         window.clearTimeout(closeExpandedTimerRef.current);
+      }
+    };
+  }, []);
+
+  const centerScrollProxy = () => {
+    const proxy = scrollProxyRef.current;
+    if (!proxy) return;
+    proxy.scrollLeft = SCROLL_PROXY_CENTER;
+    proxy.scrollTop = SCROLL_PROXY_CENTER;
+    scrollProxyLastRef.current = {
+      left: SCROLL_PROXY_CENTER,
+      top: SCROLL_PROXY_CENTER,
+    };
+  };
+
+  const setShiftScrollActive = (active: boolean) => {
+    const wrap = wrapRef.current;
+    if (wrap) {
+      if (active) wrap.dataset.shiftScroll = "1";
+      else delete wrap.dataset.shiftScroll;
+    }
+    if (active) requestAnimationFrame(centerScrollProxy);
+  };
+
+  useEffect(() => {
+    const syncShift = (event: KeyboardEvent) => {
+      const active =
+        event.key === "Shift"
+          ? event.type === "keydown"
+          : event.shiftKey || event.getModifierState?.("Shift") === true;
+      shiftKeyRef.current = active;
+      setShiftScrollActive(active);
+    };
+    const resetShift = () => {
+      shiftKeyRef.current = false;
+      setShiftScrollActive(false);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") resetShift();
+    };
+    window.addEventListener("keydown", syncShift, true);
+    window.addEventListener("keyup", syncShift, true);
+    window.addEventListener("blur", resetShift);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("keydown", syncShift, true);
+      window.removeEventListener("keyup", syncShift, true);
+      window.removeEventListener("blur", resetShift);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    const proxy = scrollProxyRef.current;
+    if (!proxy) return;
+    let frame: number | null = requestAnimationFrame(centerScrollProxy);
+
+    const onScroll = () => {
+      if (!shiftKeyRef.current) {
+        centerScrollProxy();
+        return;
+      }
+      const dx = proxy.scrollLeft - scrollProxyLastRef.current.left;
+      const dy = proxy.scrollTop - scrollProxyLastRef.current.top;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+
+      // The browser may express Shift+wheel as native horizontal scrollLeft,
+      // or as regular vertical scrollTop depending on device/browser. While
+      // Shift is held, both mean "pan canvas horizontally".
+      const panX = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+      centerScrollProxy();
+
+      const r = transformRef.current;
+      if (!r) return;
+      markCanvasMoving(120);
+      r.setTransform(
+        r.state.positionX - panX * WHEEL_PAN_MULTIPLIER,
+        r.state.positionY,
+        r.state.scale,
+        0,
+      );
+      scheduleVisibleRect(0);
+    };
+
+    proxy.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      proxy.removeEventListener("scroll", onScroll);
+      if (frame != null) {
+        cancelAnimationFrame(frame);
+        frame = null;
       }
     };
   }, []);
@@ -597,82 +660,6 @@ export function Canvas(props: {
       el.removeEventListener("gestureend", stop, opts);
     };
   }, []);
-
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-
-    const onWheel = (event: WheelEvent) => {
-      // Let ctrlKey wheel events pass through to react-zoom-pan-pinch as
-      // pinch/zoom. Plain wheel/trackpad gestures are canvas pan.
-      if (event.ctrlKey || !canPanCanvas(wrap, event.target)) return;
-      const r = transformRef.current;
-      if (!r) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      markCanvasMoving(WHEEL_PAN_SEQUENCE_MS + WHEEL_PAN_SMOOTH_MS);
-
-      const now = performance.now();
-      const existing = wheelPanTargetRef.current;
-      const target =
-        existing && now - existing.lastAt < WHEEL_PAN_SEQUENCE_MS
-          ? existing
-          : {
-              x: r.state.positionX,
-              y: r.state.positionY,
-              lastAt: now,
-              frame: null,
-            };
-      const unit =
-        event.deltaMode === WheelEvent.DOM_DELTA_LINE
-          ? 32
-          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-            ? wrap.clientHeight
-            : 1;
-
-      target.x -= event.deltaX * unit * WHEEL_PAN_MULTIPLIER;
-      target.y -= event.deltaY * unit * WHEEL_PAN_MULTIPLIER;
-      target.lastAt = now;
-      wheelPanTargetRef.current = target;
-
-      if (wheelIdleTimerRef.current != null) {
-        window.clearTimeout(wheelIdleTimerRef.current);
-      }
-      wheelIdleTimerRef.current = window.setTimeout(() => {
-        wheelIdleTimerRef.current = null;
-        scheduleVisibleRect(0);
-      }, WHEEL_PAN_SEQUENCE_MS + WHEEL_PAN_SMOOTH_MS);
-
-      if (target.frame != null) return;
-      target.frame = requestAnimationFrame(() => {
-        target.frame = null;
-        const latest = transformRef.current;
-        if (!latest) return;
-        latest.setTransform(
-          target.x,
-          target.y,
-          latest.state.scale,
-          prefersReducedMotion ? 0 : WHEEL_PAN_SMOOTH_MS,
-          "easeOut",
-        );
-      });
-    };
-
-    const opts: AddEventListenerOptions = { capture: true, passive: false };
-    wrap.addEventListener("wheel", onWheel, opts);
-    return () => {
-      wrap.removeEventListener("wheel", onWheel, opts);
-      const target = wheelPanTargetRef.current;
-      if (target?.frame != null) cancelAnimationFrame(target.frame);
-      if (wheelIdleTimerRef.current != null) {
-        window.clearTimeout(wheelIdleTimerRef.current);
-        wheelIdleTimerRef.current = null;
-      }
-      wheelPanTargetRef.current = null;
-    };
-  }, [prefersReducedMotion]);
 
   // Track wrapper width for responsive column count. Sync once on mount
   // (replaces the window.innerWidth seed with the real laid-out width)
@@ -1198,6 +1185,12 @@ export function Canvas(props: {
   return (
     <div className="canvas-wrap" ref={wrapRef}>
       <div className="canvas-grid" ref={gridRef} aria-hidden="true" />
+      <div className="canvas-scroll-proxy" ref={scrollProxyRef} aria-hidden="true">
+        <div
+          className="canvas-scroll-proxy-spacer"
+          style={{ width: SCROLL_PROXY_SIZE, height: SCROLL_PROXY_SIZE }}
+        />
+      </div>
       <TransformWrapper
         ref={transformRef}
         initialScale={initialFit.scale}
@@ -1206,13 +1199,13 @@ export function Canvas(props: {
         minScale={MIN_SCALE}
         maxScale={MAX_SCALE}
         // wheelDisabled blocks plain-wheel zoom but still allows ctrlKey
-        // wheel (trackpad pinch). Plain wheel/trackpad panning is handled by
-        // the canvas wheel listener above so it can ease into position.
+        // wheel (trackpad pinch). Plain wheel/two-finger scroll panning is
+        // handled by the library's wheelPanning path below.
         wheel={{ step: 0.15, wheelDisabled: true }}
         smooth={!prefersReducedMotion}
         customTransform={canvasTransform}
         doubleClick={{ disabled: true }}
-        panning={{ velocityDisabled: prefersReducedMotion, wheelPanning: false }}
+        panning={{ velocityDisabled: prefersReducedMotion, wheelPanning: true }}
         alignmentAnimation={{
           disabled: prefersReducedMotion,
           sizeX: 160,

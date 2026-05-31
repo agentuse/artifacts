@@ -429,6 +429,26 @@ html, body, #root {
   position: relative;
   z-index: 1;
 }
+.canvas-scroll-proxy {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  overflow: scroll;
+  pointer-events: none;
+  opacity: 0;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.canvas-scroll-proxy::-webkit-scrollbar {
+  display: none;
+}
+.canvas-wrap[data-shift-scroll="1"] .canvas-scroll-proxy {
+  pointer-events: auto;
+}
+.canvas-scroll-proxy-spacer {
+  display: block;
+  pointer-events: none;
+}
 .react-transform-wrapper,
 .react-transform-component {
   will-change: transform;
