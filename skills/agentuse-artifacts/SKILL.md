@@ -23,7 +23,7 @@ Primary model for newly generated outputs: create one folder per artifact group 
     chart.png
 ```
 
-Artifacts are normal project files. The viewer also discovers supported files that already live elsewhere in the registered project, so do not copy an existing `docs/report.md`, `screenshots/flow.png`, or similar project file just to make it visible. Support files work through relative paths.
+Artifacts are normal project files. The viewer also discovers supported files that already live elsewhere in the registered project, so do not copy an existing `docs/report.md`, `agents/daily.agentuse`, `screenshots/flow.png`, or similar project file just to make it visible. Support files work through relative paths.
 
 ## When to use this
 
@@ -109,7 +109,7 @@ Most commands accept `--json`.
 
 ## Existing project files
 
-When the user asks to "send", "save", or "preview" an existing project file as an artifact (e.g. `/agentuse-artifacts send path/to/foo.md`), treat the original file as the source of truth and leave it in place. The viewer scans supported files across the registered project, so a copy under `.agentuse/artifacts/<group>/` is no longer required for plain Markdown, HTML, PNG/JPG/WebP, or PDF files.
+When the user asks to "send", "save", or "preview" an existing project file as an artifact (e.g. `/agentuse-artifacts send path/to/foo.md`), treat the original file as the source of truth and leave it in place. The viewer scans supported files across the registered project, so a copy under `.agentuse/artifacts/<group>/` is no longer required for plain Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, or PDF files.
 
 Rules:
 - Do not move, delete, or duplicate an existing supported project file just to make it viewable.
@@ -159,7 +159,7 @@ Preferred standalone markdown artifact:
   index.md
 ```
 
-Directory artifacts are detected when they contain supported files such as `index.html`, `index.md`, or other markdown/HTML files. The viewer canvas shows files in the artifact group together, so do not create separate sibling folders for files that belong to the same package.
+Directory artifacts are detected when they contain supported files such as `index.html`, `index.md`, `index.agentuse`, or other markdown/AgentUse/HTML files. The viewer canvas shows files in the artifact group together, so do not create separate sibling folders for files that belong to the same package.
 
 Name artifact group folders after the user-facing deliverable, not the file type. Use lowercase URL-safe kebab case.
 

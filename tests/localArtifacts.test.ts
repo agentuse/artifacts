@@ -45,6 +45,7 @@ describe("project-wide local artifact discovery", () => {
 
   it("loads supported files across the project while preserving artifact-root names", () => {
     writeFile(path.join(projectPath, "README.md"), "# Read me");
+    writeFile(path.join(projectPath, "agents", "daily.agentuse"), "---\nmodel: test\n---\nRun daily report");
     writeFile(path.join(projectPath, "docs", "report.html"), "<h1>Report</h1>");
     writeFile(path.join(projectPath, "dashboard", "details.html"), "<h1>Project dashboard</h1>");
     writeFile(path.join(projectPath, ".agentuse", "artifacts", "dashboard", "index.html"), "<h1>Artifact</h1>");
@@ -61,6 +62,7 @@ describe("project-wide local artifact discovery", () => {
 
     expect([...byName.keys()]).toEqual([
       "./dashboard/details.html",
+      "agents/daily.agentuse",
       "dashboard",
       "dashboard/details.html",
       "docs/report.html",
@@ -81,10 +83,15 @@ describe("project-wide local artifact discovery", () => {
 
     const projectCollision = byName.get("./dashboard/details.html");
     expect(projectCollision?.record.projectRelPath).toBe("dashboard/details.html");
+
+    const agent = byName.get("agents/daily.agentuse");
+    expect(agent?.record.type).toBe("agentuse");
+    expect(agent?.record.projectRelPath).toBe("agents/daily.agentuse");
   });
 
   it("allows artifact-root paths but rejects ignored project paths", () => {
     expect(isAllowedProjectRelPath("docs/report.md")).toBe(true);
+    expect(isAllowedProjectRelPath("agents/daily.agentuse")).toBe(true);
     expect(isAllowedProjectRelPath(".agentuse/artifacts/report/index.md")).toBe(true);
     expect(isAllowedProjectRelPath(".agentuse")).toBe(false);
     expect(isAllowedProjectRelPath(".agentuse/skills/SKILL.md")).toBe(false);

@@ -1204,7 +1204,9 @@ function TileActions(props: { artifactId: string; record: ArtifactRecord }) {
   const filename =
     props.record.name.split("/").pop() || props.record.name;
   const isText =
-    props.record.type === "markdown" || props.record.type === "html";
+    props.record.type === "markdown" ||
+    props.record.type === "agentuse" ||
+    props.record.type === "html";
   const absolutePath = props.record.absolutePath;
 
   useEffect(() => {

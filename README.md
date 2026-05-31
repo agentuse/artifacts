@@ -97,7 +97,7 @@ Once the Skill is installed, the agent follows a single, opinionated layout:
 - Support files (CSS, images, fonts) sit next to the entry file and load via relative paths.
 - Artifacts are normal project files. Commit them to git so the team and CI see the same outputs (recommended), or gitignore them if they're throwaway.
 
-The viewer picks this up automatically, and it also discovers supported artifact files anywhere else in each registered project: Markdown, HTML, PNG/JPG/WebP, and PDF. Open it once with `npx @agentuse/artifacts open` and you get a live SPA listing every project and every artifact, polled in real time. Markdown frontmatter is rendered as a compact metadata panel, and HTML is rendered in a sandboxed iframe with a strict CSP (more on that below).
+The viewer picks this up automatically, and it also discovers supported artifact files anywhere else in each registered project: Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, and PDF. Open it once with `npx @agentuse/artifacts open` and you get a live SPA listing every project and every artifact, polled in real time. Markdown and AgentUse frontmatter is rendered as a compact metadata panel, and HTML is rendered in a sandboxed iframe with a strict CSP (more on that below).
 
 ---
 
@@ -191,7 +191,7 @@ cp /tmp/report.md .agentuse/artifacts/report/index.md
 npx @agentuse/artifacts open                       # boot the viewer, open the browser
 ```
 
-Any agent runner or shell script can drop files under `.agentuse/artifacts/<name>/index.{md,html}` and the viewer will pick them up automatically. Existing project files with supported artifact extensions are picked up too, so a report saved at `docs/report.md` or a screenshot at `screenshots/flow.png` can be viewed without copying it into the artifact folder.
+Any agent runner or shell script can drop files under `.agentuse/artifacts/<name>/index.{md,agentuse,html}` and the viewer will pick them up automatically. Existing project files with supported artifact extensions are picked up too, so a report saved at `docs/report.md`, an AgentUse agent at `agents/daily.agentuse`, or a screenshot at `screenshots/flow.png` can be viewed without copying it into the artifact folder.
 
 If you are using a different agent runner (Codex, Cursor, Windsurf, Cline, etc.), `npx skills add agentuse/artifacts --agent <name>` will install the Skill there too. For a homegrown runner or a CI step, copy `skills/agentuse-artifacts/SKILL.md` into the system prompt and the same workflow applies.
 

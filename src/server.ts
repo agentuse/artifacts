@@ -61,6 +61,7 @@ const MIME: Record<string, string> = {
   ".js": "application/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".agentuse": "text/markdown; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -131,6 +132,7 @@ const PROJECT_FILE_EXTENSIONS = new Set([
   ".htm",
   ".md",
   ".markdown",
+  ".agentuse",
   ".png",
   ".jpg",
   ".jpeg",
@@ -315,7 +317,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         return;
       }
       const buf = fs.readFileSync(local.absPath);
-      if (rec.type === "markdown") {
+      if (rec.type === "markdown" || rec.type === "agentuse") {
         send(res, 200, buf, { "content-type": "text/markdown; charset=utf-8" });
         return;
       }
@@ -395,8 +397,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       let abs = file.absPath;
       if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
         const indexHtml = path.join(abs, "index.html");
+        const indexAgentuse = path.join(abs, "index.agentuse");
         const indexMd = path.join(abs, "index.md");
-        abs = fs.existsSync(indexHtml) ? indexHtml : indexMd;
+        abs = fs.existsSync(indexHtml)
+          ? indexHtml
+          : fs.existsSync(indexAgentuse)
+            ? indexAgentuse
+            : indexMd;
       }
       if (!abs || !fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
         send(res, 404, "not found");
@@ -412,7 +419,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         });
         return;
       }
-      if (ext === ".md" || ext === ".markdown") {
+      if (ext === ".md" || ext === ".markdown" || ext === ".agentuse") {
         send(res, 200, fs.readFileSync(abs), { "content-type": "text/markdown; charset=utf-8" });
         return;
       }
@@ -444,8 +451,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       let abs = file.absPath;
       if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
         const indexHtml = path.join(abs, "index.html");
+        const indexAgentuse = path.join(abs, "index.agentuse");
         const indexMd = path.join(abs, "index.md");
-        abs = fs.existsSync(indexHtml) ? indexHtml : indexMd;
+        abs = fs.existsSync(indexHtml)
+          ? indexHtml
+          : fs.existsSync(indexAgentuse)
+            ? indexAgentuse
+            : indexMd;
       }
       if (!abs || !fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
         send(res, 404, "not found");
@@ -465,7 +477,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         });
         return;
       }
-      if (ext === ".md" || ext === ".markdown") {
+      if (ext === ".md" || ext === ".markdown" || ext === ".agentuse") {
         send(res, 200, fs.readFileSync(abs), { "content-type": "text/markdown; charset=utf-8" });
         return;
       }

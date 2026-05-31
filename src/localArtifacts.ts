@@ -268,8 +268,15 @@ function listArtifactRootArtifacts(
       // itself hasn't changed.
       const dirSig = directorySignature(abs, sub);
       const html = path.join(abs, "index.html");
+      const agentuse = path.join(abs, "index.agentuse");
       const md = path.join(abs, "index.md");
-      const entryAbs = fs.existsSync(html) ? html : fs.existsSync(md) ? md : undefined;
+      const entryAbs = fs.existsSync(html)
+        ? html
+        : fs.existsSync(agentuse)
+          ? agentuse
+          : fs.existsSync(md)
+            ? md
+            : undefined;
       if (entryAbs) {
         const rel = toPosix(path.relative(root, entryAbs));
         const type = inferType(rel);
@@ -286,20 +293,26 @@ function listArtifactRootArtifacts(
           }),
         );
       }
-      // Sibling .html / .md files in the same dir become additional artifacts
-      // named `<dir>/<file>`, so multiple artifacts can share supporting
-      // assets (css, images) in the same dir.
+      // Sibling HTML / Markdown / AgentUse files in the same dir become
+      // additional artifacts named `<dir>/<file>`, so multiple artifacts can
+      // share supporting assets (css, images) in the same dir.
       for (const f of sub) {
         if (!f.isFile()) continue;
         if (f.name.startsWith(".")) continue;
-        if (f.name === "index.html" || f.name === "index.md") continue;
+        if (
+          f.name === "index.html" ||
+          f.name === "index.md" ||
+          f.name === "index.agentuse"
+        ) {
+          continue;
+        }
         let type: ArtifactType;
         try {
           type = inferType(f.name);
         } catch {
           continue;
         }
-        if (type !== "html" && type !== "markdown") continue;
+        if (type !== "html" && type !== "markdown" && type !== "agentuse") continue;
         const rel = toPosix(path.join(ent.name, f.name));
         const fAbs = path.join(abs, f.name);
         artifacts.push(

@@ -126,7 +126,7 @@ export async function runCli(argv: string[]): Promise<void> {
           () => {
             if (!out.artifacts.length) {
               human(`No supported artifacts found in ${out.project.path}`);
-              human("Supported files include markdown, HTML, images, and PDFs.");
+              human("Supported files include markdown, AgentUse, HTML, images, and PDFs.");
               return;
             }
             human(`Artifacts in ${out.project.name}:`);

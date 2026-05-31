@@ -7,6 +7,9 @@ describe("inferType", () => {
     expect(inferType("a.md")).toBe("markdown");
     expect(inferType("a.markdown")).toBe("markdown");
   });
+  it("agentuse", () => {
+    expect(inferType("daily-report.agentuse")).toBe("agentuse");
+  });
   it("html/htm", () => {
     expect(inferType("a.html")).toBe("html");
     expect(inferType("a.htm")).toBe("html");

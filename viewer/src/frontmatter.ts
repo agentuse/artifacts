@@ -1,6 +1,10 @@
+export type FrontmatterValue = string | string[] | FrontmatterGroup;
+
+export interface FrontmatterGroup extends Array<FrontmatterField> {}
+
 export interface FrontmatterField {
   key: string;
-  value: string | string[];
+  value: FrontmatterValue;
 }
 
 export interface ParsedMarkdownFrontmatter {
@@ -9,6 +13,12 @@ export interface ParsedMarkdownFrontmatter {
 }
 
 const FRONTMATTER_DELIMS = new Set(["---", "..."]);
+
+type YamlValue = string | YamlMap | YamlList;
+interface YamlMap {
+  [key: string]: YamlValue;
+}
+interface YamlList extends Array<YamlValue> {}
 
 export function parseMarkdownFrontmatter(source: string): ParsedMarkdownFrontmatter {
   const normalized = source.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
@@ -33,57 +43,187 @@ export function parseMarkdownFrontmatter(source: string): ParsedMarkdownFrontmat
 }
 
 function parseFrontmatterLines(lines: string[]): FrontmatterField[] {
-  const fields: FrontmatterField[] = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]!;
-    if (!line.trim() || line.trimStart().startsWith("#")) continue;
-
-    const match = /^([A-Za-z0-9_.-]+):(?:\s*(.*))?$/.exec(line);
-    if (!match) continue;
-
-    const key = match[1]!;
-    const rawValue = match[2] ?? "";
-    if (rawValue.trim() === "|" || rawValue.trim() === ">") {
-      const block = readIndentedBlock(lines, i);
-      i = block.nextIndex;
-      fields.push({ key, value: block.value });
-      continue;
-    }
-    if (rawValue.trim()) {
-      fields.push({ key, value: parseInlineValue(rawValue) });
-      continue;
-    }
-
-    const items: string[] = [];
-    const blockLines: string[] = [];
-    while (i + 1 < lines.length) {
-      const next = lines[i + 1]!;
-      if (!/^\s+/.test(next) && next.trim()) break;
-      const item = /^\s*-\s+(.*)$/.exec(next);
-      if (item) items.push(cleanScalar(item[1]!));
-      else blockLines.push(next.replace(/^\s{2,}/, ""));
-      i += 1;
-    }
-    fields.push({
-      key,
-      value: items.length && blockLines.every((line) => !line.trim())
-        ? items
-        : blockLines.join("\n").trim(),
-    });
-  }
-  return fields;
+  const parsed = parseYamlMap(lines, 0, 0).value;
+  return yamlMapToFields(parsed);
 }
 
-function readIndentedBlock(lines: string[], startIndex: number): { value: string; nextIndex: number } {
-  const blockLines: string[] = [];
+function parseYamlBlock(
+  lines: string[],
+  startIndex: number,
+  indent: number,
+): { value: YamlValue; nextIndex: number } {
+  const next = nextContentLine(lines, startIndex);
+  if (next == null) return { value: "", nextIndex: startIndex };
+
+  const info = lineInfo(lines[next]);
+  if (!info || info.indent < indent) {
+    return { value: "", nextIndex: startIndex };
+  }
+  if (info.text.startsWith("- ")) {
+    return parseYamlList(lines, next, info.indent);
+  }
+  return parseYamlMap(lines, next, info.indent);
+}
+
+function parseYamlMap(
+  lines: string[],
+  startIndex: number,
+  indent: number,
+): { value: YamlMap; nextIndex: number } {
+  const out: YamlMap = {};
   let i = startIndex;
-  while (i + 1 < lines.length) {
-    const next = lines[i + 1]!;
-    if (!/^\s+/.test(next) && next.trim()) break;
-    blockLines.push(next.replace(/^\s{2,}/, ""));
+  while (i < lines.length) {
+    const info = lineInfo(lines[i]);
+    if (!info) {
+      i += 1;
+      continue;
+    }
+    if (info.indent < indent) break;
+    if (info.indent > indent) break;
+    if (info.text.startsWith("- ")) break;
+
+    const match = parseKeyValue(info.text);
+    if (!match) break;
+
+    if (match.rawValue === "|" || match.rawValue === ">") {
+      const block = readIndentedBlock(lines, i, info.indent);
+      out[match.key] = block.value;
+      i = block.nextIndex;
+      continue;
+    }
+    if (match.rawValue) {
+      out[match.key] = parseInlineValue(match.rawValue);
+      i += 1;
+      continue;
+    }
+
+    const nested = parseYamlBlock(lines, i + 1, info.indent + 1);
+    out[match.key] = nested.value;
+    i = nested.nextIndex > i + 1 ? nested.nextIndex : i + 1;
+  }
+  return { value: out, nextIndex: i };
+}
+
+function parseYamlList(
+  lines: string[],
+  startIndex: number,
+  indent: number,
+): { value: YamlValue[]; nextIndex: number } {
+  const out: YamlValue[] = [];
+  let i = startIndex;
+  while (i < lines.length) {
+    const info = lineInfo(lines[i]);
+    if (!info) {
+      i += 1;
+      continue;
+    }
+    if (info.indent < indent) break;
+    if (info.indent > indent) break;
+    if (!info.text.startsWith("- ")) break;
+
+    const rawItem = info.text.slice(2).trim();
+    if (!rawItem) {
+      const nested = parseYamlBlock(lines, i + 1, info.indent + 1);
+      out.push(nested.value);
+      i = nested.nextIndex > i + 1 ? nested.nextIndex : i + 1;
+      continue;
+    }
+
+    const firstPair = parseKeyValue(rawItem);
+    if (firstPair) {
+      const nestedStart = i + 1;
+      let nestedEnd = nestedStart;
+      while (nestedEnd < lines.length) {
+        const nestedInfo = lineInfo(lines[nestedEnd]);
+        if (!nestedInfo) {
+          nestedEnd += 1;
+          continue;
+        }
+        if (nestedInfo.indent <= info.indent) break;
+        nestedEnd += 1;
+      }
+      const synthetic = [
+        `${" ".repeat(info.indent + 2)}${rawItem}`,
+        ...lines.slice(nestedStart, nestedEnd),
+      ];
+      out.push(parseYamlMap(synthetic, 0, info.indent + 2).value);
+      i = nestedEnd;
+      continue;
+    }
+
+    out.push(cleanScalar(rawItem));
     i += 1;
   }
-  return { value: blockLines.join("\n").trim(), nextIndex: i };
+  return { value: out, nextIndex: i };
+}
+
+function yamlMapToFields(value: YamlMap): FrontmatterField[] {
+  return Object.entries(value).map(([key, child]) => ({
+    key,
+    value: yamlValueToFrontmatterValue(child),
+  }));
+}
+
+function yamlValueToFrontmatterValue(value: YamlValue): FrontmatterValue {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    if (value.every((item) => typeof item === "string")) return value as string[];
+    return value.map((item, index) => ({
+      key: `[${index}]`,
+      value: yamlValueToFrontmatterValue(item),
+    }));
+  }
+  return yamlMapToFields(value);
+}
+
+function lineInfo(line: string | undefined): { indent: number; text: string } | null {
+  if (line == null) return null;
+  if (!line.trim() || line.trimStart().startsWith("#")) return null;
+  const indent = line.match(/^ */)?.[0].length ?? 0;
+  return { indent, text: line.slice(indent) };
+}
+
+function nextContentLine(lines: string[], startIndex: number): number | null {
+  for (let i = startIndex; i < lines.length; i += 1) {
+    if (lineInfo(lines[i])) return i;
+  }
+  return null;
+}
+
+function parseKeyValue(text: string): { key: string; rawValue: string } | null {
+  const match = /^([^:][^:]*?):(?:\s*(.*))?$/.exec(text);
+  if (!match) return null;
+  const key = cleanScalar(match[1]!).trim();
+  if (!key) return null;
+  return { key, rawValue: (match[2] ?? "").trim() };
+}
+
+function readIndentedBlock(
+  lines: string[],
+  startIndex: number,
+  parentIndent = 0,
+): { value: string; nextIndex: number } {
+  const blockLines: string[] = [];
+  let minIndent = Number.POSITIVE_INFINITY;
+  let i = startIndex + 1;
+  while (i < lines.length) {
+    const next = lines[i]!;
+    if (next.trim()) {
+      const indent = next.match(/^ */)?.[0].length ?? 0;
+      if (indent <= parentIndent) break;
+      minIndent = Math.min(minIndent, indent);
+    }
+    blockLines.push(next);
+    i += 1;
+  }
+  const trimIndent = Number.isFinite(minIndent) ? minIndent : parentIndent + 2;
+  return {
+    value: blockLines
+      .map((line) => line.slice(Math.min(line.length, trimIndent)))
+      .join("\n")
+      .trim(),
+    nextIndex: i,
+  };
 }
 
 function parseInlineValue(raw: string): string | string[] {

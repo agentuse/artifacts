@@ -1,11 +1,12 @@
 import path from "node:path";
 import { CliError } from "./errors.js";
 
-export type ArtifactType = "markdown" | "html" | "png" | "jpg" | "webp" | "pdf";
+export type ArtifactType = "markdown" | "agentuse" | "html" | "png" | "jpg" | "webp" | "pdf";
 
 const EXT_TO_TYPE: Record<string, ArtifactType> = {
   ".md": "markdown",
   ".markdown": "markdown",
+  ".agentuse": "agentuse",
   ".html": "html",
   ".htm": "html",
   ".png": "png",

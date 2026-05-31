@@ -15,7 +15,7 @@ export interface ProjectRecord {
 export interface ArtifactRecord {
   projectId: string;
   name: string;
-  type: "markdown" | "html" | "png" | "jpg" | "webp" | "pdf";
+  type: "markdown" | "agentuse" | "html" | "png" | "jpg" | "webp" | "pdf";
   revision: number;
   contentHash: string;
   size: number;

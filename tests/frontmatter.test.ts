@@ -36,7 +36,7 @@ Body`);
     expect(parsed.body).toBe("Body");
   });
 
-  it("renders nested and block scalar values as text", () => {
+  it("preserves nested maps and block scalar values", () => {
     const parsed = parseMarkdownFrontmatter(`---
 agent:
   model: gpt
@@ -48,8 +48,98 @@ summary: |
 Body`);
 
     expect(parsed.fields).toEqual([
-      { key: "agent", value: "model: gpt\nprovider: openai" },
+      {
+        key: "agent",
+        value: [
+          { key: "model", value: "gpt" },
+          { key: "provider", value: "openai" },
+        ],
+      },
       { key: "summary", value: "Line one\nLine two" },
+    ]);
+  });
+
+  it("preserves multi-level YAML maps and nested scalar lists", () => {
+    const parsed = parseMarkdownFrontmatter(`---
+tools:
+  filesystem:
+    permissions: [read, write, edit]
+  bash:
+    commands:
+      - python
+      - curl
+runtime:
+  schedule:
+    timezone: America/Vancouver
+    days:
+      - monday
+      - friday
+---
+Body`);
+
+    expect(parsed.fields).toEqual([
+      {
+        key: "tools",
+        value: [
+          {
+            key: "filesystem",
+            value: [
+              { key: "permissions", value: ["read", "write", "edit"] },
+            ],
+          },
+          {
+            key: "bash",
+            value: [
+              { key: "commands", value: ["python", "curl"] },
+            ],
+          },
+        ],
+      },
+      {
+        key: "runtime",
+        value: [
+          {
+            key: "schedule",
+            value: [
+              { key: "timezone", value: "America/Vancouver" },
+              { key: "days", value: ["monday", "friday"] },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("preserves YAML lists of objects with stable indexes", () => {
+    const parsed = parseMarkdownFrontmatter(`---
+agents:
+  - name: writer
+    model: claude
+  - name: reviewer
+    model: gpt
+---
+Body`);
+
+    expect(parsed.fields).toEqual([
+      {
+        key: "agents",
+        value: [
+          {
+            key: "[0]",
+            value: [
+              { key: "name", value: "writer" },
+              { key: "model", value: "claude" },
+            ],
+          },
+          {
+            key: "[1]",
+            value: [
+              { key: "name", value: "reviewer" },
+              { key: "model", value: "gpt" },
+            ],
+          },
+        ],
+      },
     ]);
   });
 

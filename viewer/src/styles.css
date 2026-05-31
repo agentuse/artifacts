@@ -870,23 +870,33 @@ html, body, #root {
   border-radius: 8px;
   background: var(--pane-bg-elev);
 }
+.frontmatter-node {
+  border-top: 1px solid var(--border);
+}
+.frontmatter > .frontmatter-node:first-child,
+.frontmatter-children > .frontmatter-node:first-child {
+  border-top: 0;
+}
 .frontmatter-row {
   display: grid;
   grid-template-columns: minmax(96px, 0.34fr) minmax(0, 1fr);
   gap: 12px;
   padding: 7px 0;
-  border-bottom: 1px solid var(--border);
 }
-.frontmatter-row:first-child { padding-top: 0; }
-.frontmatter-row:last-child {
-  padding-bottom: 0;
-  border-bottom: 0;
+.frontmatter-branch-row {
+  grid-template-columns: minmax(0, 1fr);
+  padding-bottom: 6px;
+}
+.frontmatter-children {
+  margin: 0 0 7px 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
 }
 .frontmatter-key {
   color: var(--muted);
   font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
   overflow-wrap: anywhere;
 }

@@ -8,7 +8,11 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Minus, Plus } from "lucide-react";
 import { fetchArtifact } from "../api";
-import { parseMarkdownFrontmatter, type FrontmatterField } from "../frontmatter";
+import {
+  parseMarkdownFrontmatter,
+  type FrontmatterField,
+  type FrontmatterValue,
+} from "../frontmatter";
 import type { ArtifactRecord } from "../types";
 
 const TOUCH_CANVAS_QUERY = "(max-width: 900px), (pointer: coarse)";
@@ -98,6 +102,7 @@ function artifactDisplayName(record: ArtifactRecord): string {
 
 function artifactTypeLabel(type: ArtifactRecord["type"]): string {
   if (type === "markdown") return "Markdown";
+  if (type === "agentuse") return "AgentUse";
   return type.toUpperCase();
 }
 
@@ -139,7 +144,7 @@ export function Tile(props: {
     props.record.type === "jpg" ||
     props.record.type === "webp";
 
-  if (props.preview && props.record.type === "markdown") {
+  if (props.preview && (props.record.type === "markdown" || props.record.type === "agentuse")) {
     return <MarkdownPreview artifactId={props.artifactId} url={url} record={props.record} />;
   }
 
@@ -258,7 +263,8 @@ function MarkdownPreview(props: {
 
   return (
     <div className="tile-body markdown-preview">
-      <div className="preview-kicker">Markdown</div>
+      <div className="preview-kicker">{artifactTypeLabel(props.record.type)}</div>
+      <Frontmatter fields={parsed?.fields ?? []} />
       <div className="markdown-preview-content">
         {content == null ? (
           <p>{artifactDisplayName(props.record)}</p>
@@ -461,27 +467,67 @@ function Frontmatter(props: { fields: FrontmatterField[] }) {
   return (
     <section className="frontmatter" aria-label="frontmatter">
       {props.fields.map((field) => (
-        <div className="frontmatter-row" key={field.key}>
-          <div className="frontmatter-key">{field.key}</div>
-          <div className="frontmatter-value">
-            {Array.isArray(field.value) ? (
-              field.value.length ? (
-                <div className="frontmatter-tags">
-                  {field.value.map((item) => (
-                    <span className="frontmatter-tag" key={item}>{item}</span>
-                  ))}
-                </div>
-              ) : (
-                <span className="frontmatter-empty">empty</span>
-              )
-            ) : field.value ? (
-              field.value
-            ) : (
-              <span className="frontmatter-empty">empty</span>
-            )}
-          </div>
-        </div>
+        <FrontmatterTreeNode field={field} key={field.key} />
       ))}
     </section>
+  );
+}
+
+function FrontmatterTreeNode(props: { field: FrontmatterField }) {
+  const nested = getNestedFrontmatterFields(props.field.value);
+  if (nested) {
+    return (
+      <div className="frontmatter-node frontmatter-branch">
+        <div className="frontmatter-row frontmatter-branch-row">
+          <div className="frontmatter-key">{props.field.key}</div>
+        </div>
+        <div className="frontmatter-children">
+          {nested.map((field) => (
+            <FrontmatterTreeNode field={field} key={field.key} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="frontmatter-node">
+      <div className="frontmatter-row">
+        <div className="frontmatter-key">{props.field.key}</div>
+        <div className="frontmatter-value">
+          <FrontmatterValueView value={props.field.value} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FrontmatterValueView(props: { value: FrontmatterValue }) {
+  if (Array.isArray(props.value)) {
+    const items = props.value.filter((item): item is string => typeof item === "string");
+    return items.length ? (
+      <div className="frontmatter-tags">
+        {items.map((item, index) => (
+          <span className="frontmatter-tag" key={`${item}-${index}`}>{item}</span>
+        ))}
+      </div>
+    ) : (
+      <span className="frontmatter-empty">empty</span>
+    );
+  }
+  return props.value ? props.value : <span className="frontmatter-empty">empty</span>;
+}
+
+function getNestedFrontmatterFields(value: FrontmatterValue): FrontmatterField[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.every(isFrontmatterField) ? value : null;
+}
+
+function isFrontmatterField(value: unknown): value is FrontmatterField {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as FrontmatterField).key === "string" &&
+    "value" in value
   );
 }

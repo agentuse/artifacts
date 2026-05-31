@@ -1,5 +1,6 @@
 export type ArtifactType =
   | "markdown"
+  | "agentuse"
   | "html"
   | "png"
   | "jpg"
