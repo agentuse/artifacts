@@ -14,6 +14,9 @@ import type { ArtifactRecord } from "../types";
 const TOUCH_CANVAS_QUERY = "(max-width: 900px), (pointer: coarse)";
 const MAX_CANVAS_PREVIEW_W = 1280;
 const MAX_TOUCH_CANVAS_PREVIEW_W = 720;
+const PREVIEW_WIDTH_BUCKETS = [128, 160, 240, 320, 480, 720, 960, 1280];
+const artifactTextCache = new Map<string, string>();
+const artifactTextPromiseCache = new Map<string, Promise<string>>();
 
 function encodePath(entry: string): string {
   return entry.split("/").map(encodeURIComponent).join("/");
@@ -37,11 +40,7 @@ function artifactUrl(artifactId: string, record: ArtifactRecord): string {
   return cacheBust(base, record);
 }
 
-function imagePreviewUrl(
-  artifactId: string,
-  record: ArtifactRecord,
-  cssWidth: number | undefined,
-): string {
+function previewWidthForCss(cssWidth: number | undefined): number {
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   const maxWidth =
     typeof window !== "undefined" &&
@@ -49,11 +48,57 @@ function imagePreviewUrl(
     window.matchMedia(TOUCH_CANVAS_QUERY).matches
       ? MAX_TOUCH_CANVAS_PREVIEW_W
       : MAX_CANVAS_PREVIEW_W;
-  const requestedWidth = Math.min(
-    maxWidth,
-    Math.max(320, Math.ceil((cssWidth ?? 720) * dpr)),
+  const rawWidth = Math.max(128, Math.ceil((cssWidth ?? 720) * dpr));
+  return (
+    PREVIEW_WIDTH_BUCKETS.find((w) => w >= rawWidth && w <= maxWidth) ??
+    maxWidth
   );
+}
+
+function imagePreviewUrl(
+  artifactId: string,
+  record: ArtifactRecord,
+  requestedWidth: number,
+): string {
   return cacheBust(`/api/preview/${artifactId}?w=${requestedWidth}`, record);
+}
+
+function useStickyPreviewWidth(
+  contentHash: string,
+  desiredWidth: number | undefined,
+): number | undefined {
+  const [loaded, setLoaded] = useState(() => ({
+    contentHash,
+    width: desiredWidth,
+  }));
+
+  useEffect(() => {
+    setLoaded((prev) => {
+      if (prev.contentHash !== contentHash) {
+        return { contentHash, width: desiredWidth };
+      }
+      if (desiredWidth == null) return prev;
+      if (prev.width == null || desiredWidth > prev.width) {
+        return { contentHash, width: desiredWidth };
+      }
+      return prev;
+    });
+  }, [contentHash, desiredWidth]);
+
+  if (loaded.contentHash !== contentHash) return desiredWidth;
+  if (desiredWidth == null) return undefined;
+  if (loaded.width == null) return desiredWidth;
+  return Math.max(loaded.width, desiredWidth);
+}
+
+function artifactDisplayName(record: ArtifactRecord): string {
+  const label = record.localEntry ?? record.projectRelPath ?? record.name;
+  return label.split("/").filter(Boolean).pop() ?? label;
+}
+
+function artifactTypeLabel(type: ArtifactRecord["type"]): string {
+  if (type === "markdown") return "Markdown";
+  return type.toUpperCase();
 }
 
 function rewriteRelativeAsset(baseUrl: string, src: string | undefined): string | undefined {
@@ -67,13 +112,46 @@ function isExternalHref(href: string | undefined): boolean {
   return /^(?:https?:|mailto:|tel:)/i.test(href) || href.startsWith("//");
 }
 
+function cachedFetchArtifact(url: string): Promise<string> {
+  const cached = artifactTextCache.get(url);
+  if (cached != null) return Promise.resolve(cached);
+  const pending = artifactTextPromiseCache.get(url);
+  if (pending) return pending;
+  const next = fetchArtifact(url).then((content) => {
+    artifactTextCache.set(url, content);
+    artifactTextPromiseCache.delete(url);
+    return content;
+  });
+  artifactTextPromiseCache.set(url, next);
+  return next;
+}
+
 export function Tile(props: {
   artifactId: string;
   record: ArtifactRecord;
   previewWidth?: number;
+  preview?: boolean;
   zoomable?: boolean;
 }) {
   const url = artifactUrl(props.artifactId, props.record);
+  const isImage =
+    props.record.type === "png" ||
+    props.record.type === "jpg" ||
+    props.record.type === "webp";
+
+  if (props.preview && props.record.type === "markdown") {
+    return <MarkdownPreview artifactId={props.artifactId} url={url} record={props.record} />;
+  }
+
+  if (props.preview && props.record.type === "html") {
+    const baseSrc = props.record.local ? url : `/api/render/${props.artifactId}`;
+    return <HtmlTile baseSrc={baseSrc} preview />;
+  }
+
+  if (props.preview && !isImage) {
+    return <PreviewBody record={props.record} />;
+  }
+
   if (props.record.type === "html") {
     // Routed through HtmlTile so we can preserve scroll across hot reloads:
     // when the file changes, the iframe src changes (cache-bust) and the
@@ -98,17 +176,123 @@ export function Tile(props: {
       </div>
     );
   }
-  if (props.record.type === "png" || props.record.type === "jpg" || props.record.type === "webp") {
-    const imageUrl = props.previewWidth
-      ? imagePreviewUrl(props.artifactId, props.record, props.previewWidth)
-      : url;
-    return props.zoomable ? (
-      <ZoomableImage src={imageUrl} />
-    ) : (
-      <ImageBody src={imageUrl} />
+  if (isImage) {
+    return (
+      <ImageTile
+        artifactId={props.artifactId}
+        record={props.record}
+        originalUrl={url}
+        previewWidth={props.previewWidth}
+        zoomable={props.zoomable}
+      />
     );
   }
   return <MarkdownTile artifactId={props.artifactId} url={url} />;
+}
+
+function ImageTile(props: {
+  artifactId: string;
+  record: ArtifactRecord;
+  originalUrl: string;
+  previewWidth?: number;
+  zoomable?: boolean;
+}) {
+  const desiredPreviewWidth =
+    props.previewWidth == null ? undefined : previewWidthForCss(props.previewWidth);
+  const stickyPreviewWidth = useStickyPreviewWidth(
+    props.record.contentHash,
+    desiredPreviewWidth,
+  );
+  const imageUrl =
+    stickyPreviewWidth == null
+      ? props.originalUrl
+      : imagePreviewUrl(props.artifactId, props.record, stickyPreviewWidth);
+
+  return props.zoomable ? (
+    <ZoomableImage src={imageUrl} />
+  ) : (
+    <ImageBody src={imageUrl} />
+  );
+}
+
+function PreviewBody(props: { record: ArtifactRecord }) {
+  const name = artifactDisplayName(props.record);
+  const parent = (props.record.localEntry ?? props.record.projectRelPath ?? props.record.name)
+    .split("/")
+    .slice(0, -1)
+    .join("/");
+  return (
+    <div className="tile-body lod-preview">
+      <div className="lod-preview-type">{artifactTypeLabel(props.record.type)}</div>
+      <div className="lod-preview-name">{name}</div>
+      {parent ? <div className="lod-preview-path">{parent}</div> : null}
+    </div>
+  );
+}
+
+function MarkdownPreview(props: {
+  artifactId: string;
+  url: string;
+  record: ArtifactRecord;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    cachedFetchArtifact(props.url)
+      .then((c) => {
+        if (alive) setContent(c);
+      })
+      .catch(() => {
+        if (alive) setContent("");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [props.artifactId, props.url]);
+
+  const parsed = useMemo(
+    () => (content == null ? null : parseMarkdownFrontmatter(content)),
+    [content],
+  );
+
+  return (
+    <div className="tile-body markdown-preview">
+      <div className="preview-kicker">Markdown</div>
+      <div className="markdown-preview-content">
+        {content == null ? (
+          <p>{artifactDisplayName(props.record)}</p>
+        ) : parsed?.body.trim() ? (
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              img: ({ src, ...imgProps }) => (
+                <img
+                  {...imgProps}
+                  src={rewriteRelativeAsset(props.url, src)}
+                  loading="lazy"
+                />
+              ),
+              a: ({ href, children, ...anchorProps }) =>
+                isExternalHref(href) ? (
+                  <a {...anchorProps} href={href} target="_blank" rel="noopener noreferrer">
+                    {children}
+                  </a>
+                ) : (
+                  <a {...anchorProps} href={href}>
+                    {children}
+                  </a>
+                ),
+            }}
+          >
+            {parsed.body}
+          </ReactMarkdown>
+        ) : (
+          <p>{artifactDisplayName(props.record)}</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ImageBody(props: { src: string }) {
@@ -162,7 +346,7 @@ function ZoomableImage(props: { src: string }) {
   );
 }
 
-function HtmlTile(props: { baseSrc: string }) {
+function HtmlTile(props: { baseSrc: string; preview?: boolean }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // Latest scroll position the iframe reported via postMessage. Stored in a
   // ref (not state) so scroll updates do not trigger a parent re-render, and
@@ -201,7 +385,7 @@ function HtmlTile(props: { baseSrc: string }) {
   }, [props.baseSrc]);
 
   return (
-    <div className="tile-body html">
+    <div className={"tile-body html" + (props.preview ? " html-preview" : "")}>
       <iframe
         ref={iframeRef}
         sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"

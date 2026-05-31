@@ -673,6 +673,101 @@ html, body, #root {
   border: 0;
   display: block;
 }
+.tile-body.lod-preview {
+  padding: 34px 36px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0), var(--tile-bg) 70%),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0,
+      transparent 31px,
+      var(--border) 32px
+    ),
+    var(--pane-bg-elev);
+}
+.lod-preview-type {
+  align-self: flex-start;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  background: var(--tile-bg);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.lod-preview-name {
+  color: var(--fg);
+  font-family: "Geist Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  font-size: 38px;
+  font-weight: 650;
+  line-height: 1.02;
+  overflow-wrap: anywhere;
+}
+.lod-preview-path {
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview-kicker {
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.tile-body.markdown-preview {
+  padding: 34px 40px 48px;
+  overflow: hidden;
+  background: var(--tile-bg);
+}
+.markdown-preview-content {
+  margin-top: 18px;
+  color: var(--fg);
+  font-family: "Geist Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+    "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  font-size: 28px;
+  line-height: 1.2;
+}
+.markdown-preview-content > :first-child { margin-top: 0; }
+.markdown-preview-content > :last-child { margin-bottom: 0; }
+.markdown-preview-content h1,
+.markdown-preview-content h2,
+.markdown-preview-content h3 {
+  margin: 0 0 0.55em;
+  font-size: 1.25em;
+  line-height: 1.05;
+}
+.markdown-preview-content p,
+.markdown-preview-content ul,
+.markdown-preview-content ol,
+.markdown-preview-content blockquote {
+  margin: 0 0 0.7em;
+}
+.markdown-preview-content pre,
+.markdown-preview-content table {
+  max-width: 100%;
+  overflow: hidden;
+}
+.markdown-preview-content img {
+  max-width: 100%;
+  height: auto;
+}
+.tile-body.html-preview iframe {
+  pointer-events: none;
+}
 .tile-body.html { padding: 0; }
 .tile-body.pdf { padding: 0; }
 .tile-body.image {

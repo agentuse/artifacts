@@ -159,6 +159,20 @@ function canvasTransform(x: number, y: number, scale: number): string {
   return `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
 }
 
+function previewScaleBucket(scale: number): number {
+  if (scale < 0.14) return 0.1;
+  if (scale < 0.22) return 0.16;
+  if (scale < 0.32) return 0.25;
+  if (scale < 0.46) return 0.38;
+  if (scale < 0.68) return 0.5;
+  if (scale < 0.88) return 0.75;
+  if (scale < 1.25) return 1;
+  if (scale < 1.75) return 1.5;
+  if (scale < 2.5) return 2;
+  if (scale < 3.5) return 3;
+  return 4;
+}
+
 /** sizeOverrides is keyed by `${projectId}/${name}` (NOT artifactId) so a
  *  user-set size persists as the artifact file changes. */
 const sizeKey = (rec: { projectId: string; name: string }): string =>
@@ -658,6 +672,9 @@ export function Canvas(props: {
     typeof window !== "undefined" ? window.innerHeight : 900,
     paneInsetForViewport(typeof window !== "undefined" ? window.innerWidth : wrapWidth),
   );
+  const [previewScale, setPreviewScale] = useState(() =>
+    previewScaleBucket(initialFit.scale),
+  );
 
   // Compute the transform that fits the visible artifacts into the currently
   // open viewport. Panes are overlays, so fitting reserves their overlap but
@@ -671,6 +688,7 @@ export function Canvas(props: {
       wrap.clientHeight,
       measuredPaneInset(wrap),
     );
+    setPreviewScale(previewScaleBucket(next.scale));
     r.setTransform(next.x, next.y, next.scale, duration);
   };
 
@@ -816,6 +834,7 @@ export function Canvas(props: {
 
   const onTransformSettled = () => {
     markCanvasMoving(80);
+    setPreviewScale(previewScaleBucket(transformStateRef.current.scale));
     scheduleVisibleRect(0);
   };
 
@@ -984,6 +1003,7 @@ export function Canvas(props: {
                     y={y}
                     w={w}
                     h={h}
+                    previewScale={previewScale}
                     focused={focusedId === id}
                     onFocus={() => setFocusedId(id)}
                     onExpand={() => onExpandedChange(id)}
@@ -1047,6 +1067,7 @@ type TileWrapperProps = {
       y: number;
       w: number;
       h: number;
+      previewScale: number;
       onExpand: () => void;
       focused?: boolean;
       onFocus?: () => void;
@@ -1064,6 +1085,7 @@ type TileWrapperProps = {
       y?: never;
       w?: never;
       h?: never;
+      previewScale?: never;
     }
 );
 
@@ -1091,7 +1113,10 @@ function TileWrapper(props: TileWrapperProps) {
   // so the head stays readable when zoomed out.
   const isPreview = !props.expanded && !props.focused;
   const showInTileHead = !!props.expanded;
-  const previewWidth = props.expanded ? undefined : props.w;
+  const previewWidth =
+    !props.expanded && isPreview
+      ? Math.max(1, props.w * props.previewScale)
+      : undefined;
 
   return (
     <div
@@ -1143,6 +1168,7 @@ function TileWrapper(props: TileWrapperProps) {
           artifactId={props.artifactId}
           record={props.record}
           previewWidth={previewWidth}
+          preview={isPreview}
           zoomable={props.expanded}
         />
       </div>
