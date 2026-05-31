@@ -211,7 +211,7 @@ Every command supports a global `--json` flag. Errors emit `{ error: { code, mes
 
 ## Storage layout
 
-Artifacts live in your project. The dedicated `.agentuse/artifacts/` folder is still the recommended place for generated agent output, but the viewer scans the registered project for supported files and ignores dependency/build/cache/VCS directories. The viewer's registry lives in your home dir.
+Artifacts live in your project. The dedicated `.agentuse/artifacts/` folder is still the recommended place for generated agent output, but the viewer scans the registered project for supported files and ignores dependency/build/cache/VCS directories. Use the viewer Settings sheet to edit ignore patterns or add/remove registered projects. The viewer's registry lives in your home dir.
 
 ```
 <your-project>/                       # scanned for supported artifact files
@@ -223,6 +223,7 @@ Artifacts live in your project. The dedicated `.agentuse/artifacts/` folder is s
 
 ~/.agentuse/artifacts/                 # viewer registry (default rootDir)
   manifest.json                        # registered project paths
+  settings.json                        # UI-managed ignore patterns
   .lock                                # advisory cross-process write lock
   .serve.pid                           # running viewer pid + port
 ```

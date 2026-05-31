@@ -10,6 +10,9 @@ export function rootDir(): string {
 export function manifestPath(): string {
   return path.join(rootDir(), "manifest.json");
 }
+export function settingsPath(): string {
+  return path.join(rootDir(), "settings.json");
+}
 export function lockPath(): string {
   return path.join(rootDir(), ".lock");
 }

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -15,8 +16,9 @@ export interface ProjectInfo {
  * realpath; if even that fails (e.g. truly transient), we fall back to a UUID.
  */
 export function resolveProject(cwd: string = process.cwd()): ProjectInfo {
-  const gitRoot = findGitRoot(cwd);
-  const rootPath = gitRoot ?? cwd;
+  const expandedCwd = expandHomePath(cwd);
+  const gitRoot = findGitRoot(expandedCwd);
+  const rootPath = gitRoot ?? expandedCwd;
   const realPath = fs.realpathSync(rootPath);
   const name = path.basename(realPath);
 
@@ -36,8 +38,16 @@ export function resolveProject(cwd: string = process.cwd()): ProjectInfo {
   return { projectId, path: realPath, name };
 }
 
+export function expandHomePath(input: string): string {
+  if (input === "~") return os.homedir();
+  if (input.startsWith("~/") || input.startsWith("~\\")) {
+    return path.join(os.homedir(), input.slice(2));
+  }
+  return input;
+}
+
 function findGitRoot(start: string): string | null {
-  let dir = path.resolve(start);
+  let dir = path.resolve(expandHomePath(start));
   while (true) {
     if (fs.existsSync(path.join(dir, ".git"))) return dir;
     const parent = path.dirname(dir);

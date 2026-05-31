@@ -5,7 +5,8 @@ import { spawn } from "node:child_process";
 import { CliError } from "./errors.js";
 import type { ArtifactRecord, Manifest, ProjectRecord } from "./manifest.js";
 import { readManifest, withLock, writeManifestAtomic } from "./manifest.js";
-import { resolveProject, type ProjectInfo } from "./project.js";
+import { expandHomePath, resolveProject, type ProjectInfo } from "./project.js";
+import { isIgnoredByPatterns, readSettings } from "./settings.js";
 import { inferType, type ArtifactType } from "./validation.js";
 import { readImageDims } from "./imageDims.js";
 
@@ -13,30 +14,6 @@ export const LOCAL_ARTIFACTS_REL = path.join(".agentuse", "artifacts");
 const LOCAL_ARTIFACTS_POSIX = ".agentuse/artifacts";
 const PROJECT_FILE_ID_PREFIX = "project:";
 const IMAGE_HEADER_BYTES = 256 * 1024;
-
-const IGNORED_PROJECT_DIR_NAMES = new Set([
-  ".git",
-  ".hg",
-  ".svn",
-  "node_modules",
-  "bower_components",
-  "dist",
-  "viewer-dist",
-  "build",
-  "out",
-  "coverage",
-  "target",
-  ".next",
-  ".nuxt",
-  ".svelte-kit",
-  ".vite",
-  ".turbo",
-  ".cache",
-  "__pycache__",
-  "tmp",
-  "temp",
-  "logs",
-]);
 
 export interface LocalArtifact {
   artifactId: string;
@@ -158,10 +135,11 @@ function uniqueProjects(manifest: Manifest): Array<[string, ProjectRecord]> {
 }
 
 function canonicalPath(input: string): string {
+  const expanded = expandHomePath(input);
   try {
-    return fs.realpathSync(input);
+    return fs.realpathSync(expanded);
   } catch {
-    return path.resolve(input);
+    return path.resolve(expanded);
   }
 }
 
@@ -361,6 +339,7 @@ function listProjectFileArtifacts(
   const root = project.path;
   const artifacts: LocalArtifact[] = [];
   const stack: Array<{ absDir: string; relDir: string }> = [{ absDir: root, relDir: "" }];
+  const ignorePatterns = readSettings().ignorePatterns;
 
   while (stack.length > 0) {
     const cur = stack.pop()!;
@@ -377,11 +356,11 @@ function listProjectFileArtifacts(
       const rel = toPosix(cur.relDir ? path.join(cur.relDir, ent.name) : ent.name);
 
       if (ent.isDirectory()) {
-        if (isAllowedProjectScanDir(rel)) stack.push({ absDir: abs, relDir: rel });
+        if (isAllowedProjectScanDir(rel, ignorePatterns)) stack.push({ absDir: abs, relDir: rel });
         continue;
       }
       if (!ent.isFile()) continue;
-      if (!isAllowedProjectRelPath(rel)) continue;
+      if (!isAllowedProjectRelPath(rel, ignorePatterns)) continue;
 
       let type: ArtifactType;
       try {
@@ -575,7 +554,10 @@ function decodeArtifactPath(relInput: string): string {
   return toPosix(relPath);
 }
 
-export function isAllowedProjectRelPath(relPath: string): boolean {
+export function isAllowedProjectRelPath(
+  relPath: string,
+  ignorePatterns = readSettings().ignorePatterns,
+): boolean {
   const normalized = toPosix(relPath).replace(/^\/+/, "");
   if (!normalized) return false;
   if (normalized === ".agentuse") return false;
@@ -593,14 +575,14 @@ export function isAllowedProjectRelPath(relPath: string): boolean {
     if (isWithinLocalArtifacts(segmentRel)) continue;
     if (segmentRel.startsWith(".agentuse/")) return false;
     if (part.startsWith(".")) return false;
-    if (IGNORED_PROJECT_DIR_NAMES.has(part)) return false;
   }
+  if (isIgnoredByPatterns(normalized, ignorePatterns)) return false;
   return true;
 }
 
-function isAllowedProjectScanDir(relPath: string): boolean {
+function isAllowedProjectScanDir(relPath: string, ignorePatterns: string[]): boolean {
   const normalized = toPosix(relPath).replace(/^\/+/, "");
-  return normalized === ".agentuse" || isAllowedProjectRelPath(normalized);
+  return normalized === ".agentuse" || isAllowedProjectRelPath(normalized, ignorePatterns);
 }
 
 function isWithinLocalArtifacts(relPath: string): boolean {

@@ -11,10 +11,18 @@ import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import {
   buildLocalManifest,
   findLocalArtifactById,
+  forgetProject,
+  initProject,
+  pruneMissingProjects,
   type LocalArtifact,
   resolveLocalProjectFile,
   resolveProjectFile,
 } from "./localArtifacts.js";
+import {
+  DEFAULT_IGNORE_PATTERNS,
+  readSettings,
+  writeSettings,
+} from "./settings.js";
 
 export const DEFAULT_PORT = 7878;
 const HOST = "127.0.0.1";
@@ -155,6 +163,35 @@ function projectFileCsp(ext: string): string | null | undefined {
   return undefined;
 }
 
+function sendJson(res: http.ServerResponse, body: unknown, status = 200): void {
+  send(res, status, JSON.stringify(body), { "content-type": MIME[".json"]! });
+}
+
+async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buf.length;
+    if (size > 128 * 1024) throw new CliError("INVALID_INPUT", "request body too large");
+    chunks.push(buf);
+  }
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new CliError("INVALID_INPUT", "request body must be JSON");
+  }
+}
+
+function bodyObject(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new CliError("INVALID_INPUT", "request body must be an object");
+  }
+  return body as Record<string, unknown>;
+}
+
 function isImageArtifact(local: LocalArtifact): boolean {
   return (
     local.record.type === "png" ||
@@ -250,6 +287,70 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       send(res, 200, JSON.stringify(m), { "content-type": MIME[".json"]! });
     } catch (e) {
       send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  if (pathname === "/api/settings") {
+    try {
+      if (req.method === "GET") {
+        sendJson(res, {
+          defaultIgnorePatterns: DEFAULT_IGNORE_PATTERNS,
+          settings: readSettings(),
+        });
+        return;
+      }
+      if (req.method === "PUT") {
+        const body = bodyObject(await readJsonBody(req));
+        const ignorePatterns = body.ignorePatterns;
+        if (!Array.isArray(ignorePatterns)) {
+          throw new CliError("INVALID_INPUT", "ignorePatterns must be an array");
+        }
+        const settings = writeSettings({ ignorePatterns });
+        sendJson(res, { defaultIgnorePatterns: DEFAULT_IGNORE_PATTERNS, settings });
+        return;
+      }
+      send(res, 405, "method not allowed");
+    } catch (e) {
+      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
+      send(res, code, (e as Error).message);
+    }
+    return;
+  }
+
+  if (pathname === "/api/projects" && req.method === "POST") {
+    try {
+      const body = bodyObject(await readJsonBody(req));
+      if (typeof body.path !== "string" || !body.path.trim()) {
+        throw new CliError("INVALID_INPUT", "path is required");
+      }
+      const out = await initProject(body.path);
+      sendJson(res, out);
+    } catch (e) {
+      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
+      send(res, code, (e as Error).message);
+    }
+    return;
+  }
+
+  if (pathname === "/api/projects/prune" && req.method === "POST") {
+    try {
+      const removed = await pruneMissingProjects();
+      sendJson(res, { removed });
+    } catch (e) {
+      send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  const deleteProjectMatch = /^\/api\/projects\/([^/]+)$/.exec(pathname);
+  if (deleteProjectMatch && req.method === "DELETE") {
+    try {
+      const out = await forgetProject(decodeURIComponent(deleteProjectMatch[1]!));
+      sendJson(res, out);
+    } catch (e) {
+      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
+      send(res, code, (e as Error).message);
     }
     return;
   }

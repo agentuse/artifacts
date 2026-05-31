@@ -10,6 +10,7 @@ import {
   listLocalArtifactsForProject,
   resolveProjectFile,
 } from "../src/localArtifacts";
+import { writeSettings } from "../src/settings";
 
 function writeFile(file: string, body = ""): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -99,6 +100,23 @@ describe("project-wide local artifact discovery", () => {
     expect(isAllowedProjectRelPath("dist/report.html")).toBe(false);
     expect(isAllowedProjectRelPath("viewer-dist/index.html")).toBe(false);
     expect(isAllowedProjectRelPath(".github/workflows/note.md")).toBe(false);
+  });
+
+  it("uses configured ignore patterns for project-wide discovery", () => {
+    writeSettings({ ignorePatterns: ["reports/private/**", "*.draft.md"] });
+    writeFile(path.join(projectPath, "reports", "public", "summary.md"), "# Public");
+    writeFile(path.join(projectPath, "reports", "private", "summary.md"), "# Private");
+    writeFile(path.join(projectPath, "notes.draft.md"), "# Draft");
+    writeFile(path.join(projectPath, ".agentuse", "artifacts", "private", "index.md"), "# Artifact");
+
+    const artifacts = listLocalArtifactsForProject(projectId, projectRecord());
+    expect(artifacts.map((a) => a.record.name)).toEqual([
+      "private",
+      "reports/public/summary.md",
+    ]);
+    expect(isAllowedProjectRelPath("reports/private/summary.md")).toBe(false);
+    expect(isAllowedProjectRelPath("notes.draft.md")).toBe(false);
+    expect(isAllowedProjectRelPath(".agentuse/artifacts/private/index.md")).toBe(true);
   });
 
   it("resolves project files inside the project root only", () => {
