@@ -37,8 +37,6 @@ const PAN_INERTIA_MS = 480;
 const PAN_ALIGNMENT_MS = 180;
 const PAN_VELOCITY_SENSITIVITY = 1.08;
 const WHEEL_PAN_MULTIPLIER = 1.08;
-const SCROLL_PROXY_SIZE = 200_000;
-const SCROLL_PROXY_CENTER = SCROLL_PROXY_SIZE / 2;
 const MOVING_IDLE_MS = 220;
 // Hard floor for resize so the user can't shrink a tile to nothing and lose
 // the resize handle. Maximum is implicit (canvas can grow). The same floor
@@ -103,6 +101,22 @@ type TileExpandOrigin = {
 
 type KeyboardDirection = "left" | "right" | "up" | "down";
 
+const CANVAS_SHIFT_WHEEL_EXCLUDED_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "textarea",
+  "select",
+  "[contenteditable='true']",
+  ".toolbar",
+  ".drawer",
+  ".tile-expanded",
+  ".tile-head",
+  ".tile-resize",
+  ".image-zoom",
+  ".action-menu-panel",
+].join(",");
+
 const CANVAS_KEYBOARD_EXCLUDED_SELECTOR = [
   "button",
   "a",
@@ -128,6 +142,17 @@ function canUseCanvasKeyboard(target: EventTarget | null): boolean {
   if (document.querySelector(".settings-layer")) return false;
   if (!(target instanceof Element)) return true;
   return !target.closest(CANVAS_KEYBOARD_EXCLUDED_SELECTOR);
+}
+
+function canUseShiftWheelPan(wrap: HTMLElement, target: EventTarget | null): boolean {
+  if (!(target instanceof Element) || !wrap.contains(target)) return false;
+  return !target.closest(CANVAS_SHIFT_WHEEL_EXCLUDED_SELECTOR);
+}
+
+function wheelMessageDeltaUnit(deltaMode: number, wrap: HTMLElement): number {
+  if (deltaMode === WheelEvent.DOM_DELTA_LINE) return 32;
+  if (deltaMode === WheelEvent.DOM_DELTA_PAGE) return wrap.clientHeight;
+  return 1;
 }
 
 function visibleRectFromTransform(
@@ -465,17 +490,11 @@ export function Canvas(props: {
   const wrapRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const scrollProxyRef = useRef<HTMLDivElement>(null);
   const floatingHeadRef = useRef<HTMLDivElement>(null);
   const visibleFrameRef = useRef<number | null>(null);
   const visibleTimerRef = useRef<number | null>(null);
   const movingTimerRef = useRef<number | null>(null);
   const closeExpandedTimerRef = useRef<number | null>(null);
-  const shiftKeyRef = useRef(false);
-  const scrollProxyLastRef = useRef({
-    left: SCROLL_PROXY_CENTER,
-    top: SCROLL_PROXY_CENTER,
-  });
   const lastGridScaleRef = useRef<number | null>(null);
   const [visibleRect, setVisibleRect] = useState<CanvasRect | null>(null);
   const visibleRectRef = useRef<CanvasRect | null>(null);
@@ -556,94 +575,104 @@ export function Canvas(props: {
     };
   }, []);
 
-  const centerScrollProxy = () => {
-    const proxy = scrollProxyRef.current;
-    if (!proxy) return;
-    proxy.scrollLeft = SCROLL_PROXY_CENTER;
-    proxy.scrollTop = SCROLL_PROXY_CENTER;
-    scrollProxyLastRef.current = {
-      left: SCROLL_PROXY_CENTER,
-      top: SCROLL_PROXY_CENTER,
-    };
+  const panCanvasByWheel = (screenDeltaX: number, screenDeltaY: number) => {
+    if (Math.abs(screenDeltaX) < 0.5 && Math.abs(screenDeltaY) < 0.5) return;
+    const r = transformRef.current;
+    if (!r) return;
+    markCanvasMoving(120);
+    const { positionX, positionY, scale } = transformStateRef.current;
+    r.setTransform(
+      positionX - screenDeltaX * WHEEL_PAN_MULTIPLIER,
+      positionY - screenDeltaY * WHEEL_PAN_MULTIPLIER,
+      scale,
+      0,
+    );
+    scheduleVisibleRect(0);
   };
 
-  const setShiftScrollActive = (active: boolean) => {
-    const wrap = wrapRef.current;
-    if (wrap) {
-      if (active) wrap.dataset.shiftScroll = "1";
-      else delete wrap.dataset.shiftScroll;
+  const wheelPanDeltas = (
+    deltaX: number,
+    deltaY: number,
+    deltaMode: number,
+    shiftKey: boolean,
+    wrap: HTMLElement,
+  ) => {
+    const unit = wheelMessageDeltaUnit(deltaMode, wrap);
+    const dx = deltaX * unit;
+    const dy = deltaY * unit;
+    if (shiftKey) {
+      return {
+        x: Math.abs(dx) > Math.abs(dy) ? dx : dy,
+        y: 0,
+      };
     }
-    if (active) requestAnimationFrame(centerScrollProxy);
+    return { x: dx, y: dy };
   };
 
   useEffect(() => {
-    const syncShift = (event: KeyboardEvent) => {
-      const active =
-        event.key === "Shift"
-          ? event.type === "keydown"
-          : event.shiftKey || event.getModifierState?.("Shift") === true;
-      shiftKeyRef.current = active;
-      setShiftScrollActive(active);
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+
+    const onWheel = (event: WheelEvent) => {
+      // Keep ctrlKey wheel events available for trackpad pinch/zoom. All
+      // scroll-wheel panning is handled here, tldraw-style, so Shift+wheel
+      // becomes horizontal pan without waiting for native scroll to settle.
+      if (event.ctrlKey || !canUseShiftWheelPan(wrap, event.target)) return;
+      const shiftActive =
+        event.shiftKey || event.getModifierState?.("Shift") === true;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const { x, y } = wheelPanDeltas(
+        event.deltaX,
+        event.deltaY,
+        event.deltaMode,
+        shiftActive,
+        wrap,
+      );
+      panCanvasByWheel(x, y);
     };
-    const resetShift = () => {
-      shiftKeyRef.current = false;
-      setShiftScrollActive(false);
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") resetShift();
-    };
-    window.addEventListener("keydown", syncShift, true);
-    window.addEventListener("keyup", syncShift, true);
-    window.addEventListener("blur", resetShift);
-    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    const opts: AddEventListenerOptions = { capture: true, passive: false };
+    wrap.addEventListener("wheel", onWheel, opts);
     return () => {
-      window.removeEventListener("keydown", syncShift, true);
-      window.removeEventListener("keyup", syncShift, true);
-      window.removeEventListener("blur", resetShift);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      wrap.removeEventListener("wheel", onWheel, opts);
     };
   }, []);
 
   useEffect(() => {
-    const proxy = scrollProxyRef.current;
-    if (!proxy) return;
-    let frame: number | null = requestAnimationFrame(centerScrollProxy);
-
-    const onScroll = () => {
-      if (!shiftKeyRef.current) {
-        centerScrollProxy();
+    const onMessage = (event: MessageEvent) => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const data = event.data as
+        | {
+            type?: unknown;
+            deltaX?: unknown;
+            deltaY?: unknown;
+            deltaMode?: unknown;
+            shiftKey?: unknown;
+            ctrlKey?: unknown;
+          }
+        | null;
+      if (!data || data.type !== "agentuse:wheel") return;
+      if (data.shiftKey !== true || data.ctrlKey === true) return;
+      if (typeof data.deltaX !== "number" || typeof data.deltaY !== "number") {
         return;
       }
-      const dx = proxy.scrollLeft - scrollProxyLastRef.current.left;
-      const dy = proxy.scrollTop - scrollProxyLastRef.current.top;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
-
-      // The browser may express Shift+wheel as native horizontal scrollLeft,
-      // or as regular vertical scrollTop depending on device/browser. While
-      // Shift is held, both mean "pan canvas horizontally".
-      const panX = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-      centerScrollProxy();
-
-      const r = transformRef.current;
-      if (!r) return;
-      markCanvasMoving(120);
-      r.setTransform(
-        r.state.positionX - panX * WHEEL_PAN_MULTIPLIER,
-        r.state.positionY,
-        r.state.scale,
-        0,
+      const deltaMode = typeof data.deltaMode === "number" ? data.deltaMode : 0;
+      const { x, y } = wheelPanDeltas(
+        data.deltaX,
+        data.deltaY,
+        deltaMode,
+        true,
+        wrap,
       );
-      scheduleVisibleRect(0);
+      panCanvasByWheel(x, y);
     };
 
-    proxy.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      proxy.removeEventListener("scroll", onScroll);
-      if (frame != null) {
-        cancelAnimationFrame(frame);
-        frame = null;
-      }
-    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   useEffect(() => {
@@ -1185,12 +1214,6 @@ export function Canvas(props: {
   return (
     <div className="canvas-wrap" ref={wrapRef}>
       <div className="canvas-grid" ref={gridRef} aria-hidden="true" />
-      <div className="canvas-scroll-proxy" ref={scrollProxyRef} aria-hidden="true">
-        <div
-          className="canvas-scroll-proxy-spacer"
-          style={{ width: SCROLL_PROXY_SIZE, height: SCROLL_PROXY_SIZE }}
-        />
-      </div>
       <TransformWrapper
         ref={transformRef}
         initialScale={initialFit.scale}
@@ -1200,12 +1223,13 @@ export function Canvas(props: {
         maxScale={MAX_SCALE}
         // wheelDisabled blocks plain-wheel zoom but still allows ctrlKey
         // wheel (trackpad pinch). Plain wheel/two-finger scroll panning is
-        // handled by the library's wheelPanning path below.
+        // handled by the capture-phase wheel listener above so Shift+wheel
+        // can be converted to horizontal pan before native scroll settles.
         wheel={{ step: 0.15, wheelDisabled: true }}
         smooth={!prefersReducedMotion}
         customTransform={canvasTransform}
         doubleClick={{ disabled: true }}
-        panning={{ velocityDisabled: prefersReducedMotion, wheelPanning: true }}
+        panning={{ velocityDisabled: prefersReducedMotion, wheelPanning: false }}
         alignmentAnimation={{
           disabled: prefersReducedMotion,
           sizeX: 160,

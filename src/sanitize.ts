@@ -207,6 +207,32 @@ export const ARTIFACT_SCROLL_SHIM = `<script>
     },
     { passive: true },
   );
+
+  // Forward Shift+wheel to the parent canvas. Browser/iframe boundaries keep
+  // wheel events from bubbling to the viewer, so without this the artifact
+  // document can consume native horizontal scrolling until Shift is released.
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.shiftKey || event.ctrlKey) return;
+      try {
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
+        window.parent.postMessage(
+          {
+            type: "agentuse:wheel",
+            deltaX: event.deltaX,
+            deltaY: event.deltaY,
+            deltaMode: event.deltaMode,
+            shiftKey: event.shiftKey,
+            ctrlKey: event.ctrlKey,
+          },
+          "*",
+        );
+      } catch {}
+    },
+    { capture: true, passive: false },
+  );
 })();
 </script>`;
 
