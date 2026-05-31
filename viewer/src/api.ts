@@ -1,9 +1,13 @@
 import type { Manifest } from "./types";
 
-export async function fetchManifest(): Promise<Manifest> {
+export async function fetchManifestRaw(): Promise<string> {
   const res = await fetch("/api/manifest", { cache: "no-store" });
   if (!res.ok) throw new Error(`manifest fetch failed: ${res.status}`);
-  return res.json();
+  return res.text();
+}
+
+export async function fetchManifest(): Promise<Manifest> {
+  return JSON.parse(await fetchManifestRaw()) as Manifest;
 }
 
 export async function fetchArtifact(idOrUrl: string): Promise<string> {

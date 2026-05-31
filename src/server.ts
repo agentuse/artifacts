@@ -1,14 +1,17 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import sharp from "sharp";
 import { CliError } from "./errors.js";
 import { rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import {
   buildLocalManifest,
   findLocalArtifactById,
+  type LocalArtifact,
   resolveLocalProjectFile,
   resolveProjectFile,
 } from "./localArtifacts.js";
@@ -119,6 +122,10 @@ const BINARY_MIME: Record<string, string> = {
   pdf: "application/pdf",
 };
 
+const PREVIEW_WIDTHS = [320, 480, 720, 960, 1280, 1600, 2048];
+const PREVIEW_FORMAT = "webp";
+const PREVIEW_MIME = "image/webp";
+
 const PROJECT_FILE_EXTENSIONS = new Set([
   ".html",
   ".htm",
@@ -146,6 +153,67 @@ function projectFileCsp(ext: string): string | null | undefined {
   return undefined;
 }
 
+function isImageArtifact(local: LocalArtifact): boolean {
+  return (
+    local.record.type === "png" ||
+    local.record.type === "jpg" ||
+    local.record.type === "webp"
+  );
+}
+
+function previewWidth(raw: string | null): number {
+  const requested = Number.parseInt(raw ?? "", 10);
+  const target = Number.isFinite(requested) ? requested : 960;
+  const clamped = Math.min(
+    PREVIEW_WIDTHS[PREVIEW_WIDTHS.length - 1]!,
+    Math.max(PREVIEW_WIDTHS[0]!, target),
+  );
+  return PREVIEW_WIDTHS.find((w) => w >= clamped) ?? PREVIEW_WIDTHS[PREVIEW_WIDTHS.length - 1]!;
+}
+
+function previewCachePath(local: LocalArtifact, width: number): string {
+  const key = createHash("sha256")
+    .update(local.artifactId)
+    .update("\0")
+    .update(local.record.contentHash)
+    .update("\0")
+    .update(String(width))
+    .digest("hex");
+  return path.join(rootDir(), "preview-cache", `${key}.${PREVIEW_FORMAT}`);
+}
+
+async function readOrCreatePreview(local: LocalArtifact, width: number): Promise<Buffer> {
+  const outPath = previewCachePath(local, width);
+  if (fs.existsSync(outPath)) return fs.readFileSync(outPath);
+
+  const buf = await sharp(local.absPath, { failOn: "none" })
+    .rotate()
+    .resize({
+      width,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .webp({
+      quality: 78,
+      effort: 4,
+    })
+    .toBuffer();
+
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  const tmp = `${outPath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, buf);
+  try {
+    fs.renameSync(tmp, outPath);
+  } catch {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* ignore */
+    }
+  }
+  return fs.existsSync(outPath) ? fs.readFileSync(outPath) : buf;
+}
+
 function serveStatic(res: http.ServerResponse, dir: string, file: string): void {
   const ext = path.extname(file).toLowerCase();
   const abs = path.join(dir, file);
@@ -170,7 +238,7 @@ function serveStatic(res: http.ServerResponse, dir: string, file: string): void 
   });
 }
 
-function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dist: string }): void {
+async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dist: string }): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${HOST}`);
   const pathname = url.pathname;
 
@@ -178,6 +246,52 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dis
     try {
       const m = buildLocalManifest();
       send(res, 200, JSON.stringify(m), { "content-type": MIME[".json"]! });
+    } catch (e) {
+      send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  // /api/preview/{artifactId}?w=960 -> cached WebP thumbnail for image
+  // artifacts. Canvas tiles use this path; fullscreen/download still request
+  // the original bytes. The contentHash query param from the viewer makes
+  // these effectively immutable until the source file changes.
+  const previewMatch = /^\/api\/preview\/([A-Za-z0-9_]+)$/.exec(pathname);
+  if (previewMatch) {
+    const id = previewMatch[1]!;
+    try {
+      const local = findLocalArtifactById(id);
+      if (!local) {
+        send(res, 404, "not found");
+        return;
+      }
+      if (!isImageArtifact(local)) {
+        send(res, 400, "not an image artifact");
+        return;
+      }
+      const width = previewWidth(url.searchParams.get("w"));
+      const buf = await readOrCreatePreview(local, width);
+      const etag = `"${local.record.contentHash}:${width}:${PREVIEW_FORMAT}"`;
+      if (req.headers["if-none-match"] === etag) {
+        res.writeHead(304, {
+          "cache-control": "public, max-age=31536000, immutable",
+          "etag": etag,
+        });
+        res.end();
+        return;
+      }
+      send(
+        res,
+        200,
+        buf,
+        {
+          "content-type": PREVIEW_MIME,
+          "content-disposition": "inline",
+          "cache-control": "public, max-age=31536000, immutable",
+          "etag": etag,
+        },
+        { csp: IMAGE_CSP },
+      );
     } catch (e) {
       send(res, 500, (e as Error).message);
     }
@@ -424,7 +538,15 @@ export async function startServer(opts: StartOptions): Promise<ServeStatus> {
       `viewer dist not found at ${dist}; run 'npm run build:viewer'`,
     );
   }
-  const server = http.createServer((req, res) => handle(req, res, { dist }));
+  const server = http.createServer((req, res) => {
+    handle(req, res, { dist }).catch((e) => {
+      if (res.headersSent) {
+        res.destroy(e);
+        return;
+      }
+      send(res, 500, (e as Error).message);
+    });
+  });
   const port = await listenWithFallback(server, opts.preferredPort);
   const rec: ServeStatus = {
     pid: process.pid,

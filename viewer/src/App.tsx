@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Menu, X } from "lucide-react";
-import { fetchManifest } from "./api";
+import { fetchManifestRaw } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { ArtifactList, artifactMatchesGroup, latestGroupFor } from "./components/ArtifactList";
@@ -56,6 +56,7 @@ function navRoute(r: Route, replace = false): void {
 
 export function App() {
   const [manifest, setManifest] = useState<Manifest | null>(null);
+  const manifestRawRef = useRef<string | null>(null);
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.href));
   const [sort, setSortState] = useState<SortMode>(() => loadSort());
   const setSort = (next: SortMode) => {
@@ -68,8 +69,10 @@ export function App() {
     let alive = true;
     const tick = async () => {
       try {
-        const m = await fetchManifest();
-        if (alive) setManifest(m);
+        const raw = await fetchManifestRaw();
+        if (!alive || raw === manifestRawRef.current) return;
+        manifestRawRef.current = raw;
+        setManifest(JSON.parse(raw) as Manifest);
       } catch {
         /* show empty until next poll */
       }

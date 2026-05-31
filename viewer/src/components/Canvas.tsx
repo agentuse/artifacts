@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   TransformWrapper,
   TransformComponent,
@@ -20,12 +20,24 @@ import { Tile } from "./Tile";
 
 const TILE_W = 720;
 const TILE_H = 720;
-const GAP = 64;
-const MIN_COLS = 1;
-const MAX_COLS = 6;
-const MIN_SCALE = 0.2;
+const GAP = 72;
+const ROW_ITEM_TARGET = 10;
+const MIN_SCALE = 0.08;
 const MAX_SCALE = 4;
 const FIT_PADDING = 24;
+const INITIAL_VISIBLE_TILE_LIMIT = 32;
+const TOUCH_INITIAL_VISIBLE_TILE_LIMIT = 6;
+const VIRTUAL_OVERSCAN_SCREEN_PX = 600;
+const TOUCH_VIRTUAL_OVERSCAN_SCREEN_PX = 160;
+const VISIBLE_RECT_EPSILON = 240;
+const VISIBLE_RECT_IDLE_MS = 110;
+const PAN_INERTIA_MS = 480;
+const PAN_ALIGNMENT_MS = 180;
+const PAN_VELOCITY_SENSITIVITY = 1.08;
+const WHEEL_PAN_SMOOTH_MS = 130;
+const WHEEL_PAN_SEQUENCE_MS = 180;
+const WHEEL_PAN_MULTIPLIER = 1.08;
+const MOVING_IDLE_MS = 220;
 // Hard floor for resize so the user can't shrink a tile to nothing and lose
 // the resize handle. Maximum is implicit (canvas can grow). The same floor
 // is applied when reading agent-supplied suggestedWidth/suggestedHeight so
@@ -63,6 +75,89 @@ function RelativeTime(props: { iso: string }) {
 }
 
 type SizeMap = Record<string, { w: number; h: number }>;
+
+type LaidOut = {
+  id: string;
+  rec: ArtifactRecord;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+type CanvasRect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+type WheelPanTarget = {
+  x: number;
+  y: number;
+  lastAt: number;
+  frame: number | null;
+};
+
+const CANVAS_PAN_EXCLUDED_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "textarea",
+  "select",
+  "[contenteditable='true']",
+  ".toolbar",
+  ".drawer",
+  ".tile-expanded",
+  ".tile-head",
+  ".tile-resize",
+  ".image-zoom",
+  ".action-menu-panel",
+].join(",");
+
+function tileIntersectsRect(tile: LaidOut, rect: CanvasRect): boolean {
+  return (
+    tile.x < rect.right &&
+    tile.x + tile.w > rect.left &&
+    tile.y < rect.bottom &&
+    tile.y + tile.h > rect.top
+  );
+}
+
+function canPanCanvas(wrap: HTMLElement, target: EventTarget | null): boolean {
+  if (!(target instanceof Element) || !wrap.contains(target)) return false;
+  return !target.closest(CANVAS_PAN_EXCLUDED_SELECTOR);
+}
+
+function visibleRectFromTransform(
+  state: { positionX: number; positionY: number; scale: number },
+  viewportW: number,
+  viewportH: number,
+  overscanScreenPx = VIRTUAL_OVERSCAN_SCREEN_PX,
+): CanvasRect {
+  const scale = Math.max(0.01, state.scale);
+  const overscan = overscanScreenPx / scale;
+  return {
+    left: -state.positionX / scale - overscan,
+    top: -state.positionY / scale - overscan,
+    right: (viewportW - state.positionX) / scale + overscan,
+    bottom: (viewportH - state.positionY) / scale + overscan,
+  };
+}
+
+function rectsClose(a: CanvasRect | null, b: CanvasRect): boolean {
+  return (
+    !!a &&
+    Math.abs(a.left - b.left) < VISIBLE_RECT_EPSILON &&
+    Math.abs(a.top - b.top) < VISIBLE_RECT_EPSILON &&
+    Math.abs(a.right - b.right) < VISIBLE_RECT_EPSILON &&
+    Math.abs(a.bottom - b.bottom) < VISIBLE_RECT_EPSILON
+  );
+}
+
+function canvasTransform(x: number, y: number, scale: number): string {
+  return `translate3d(${x}px, ${y}px, 0) scale(${scale})`;
+}
 
 /** sizeOverrides is keyed by `${projectId}/${name}` (NOT artifactId) so a
  *  user-set size persists as the artifact file changes. */
@@ -129,6 +224,44 @@ function persistSizes(map: SizeMap): void {
     // Quota / private mode — silently ignore. Sizes still work in-session.
   }
 }
+
+function usePrefersReducedMotion(): boolean {
+  const [prefersReduced, setPrefersReduced] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  });
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setPrefersReduced(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  return prefersReduced;
+}
+
+function useTouchCanvas(): boolean {
+  const query = "(max-width: 900px), (pointer: coarse)";
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia(query).matches;
+  });
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia(query);
+    const onChange = () => setMatches(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  return matches;
+}
+
 // Floating head (Figma frame-label) sits above the focused tile in screen
 // space, so it stays readable at every zoom. Height is fixed in CSS — we
 // reuse the value here for vertical positioning. Sized to host 44×44
@@ -146,6 +279,8 @@ export function Canvas(props: {
   onExpandedChange: (id: string | null) => void;
 }) {
   const { artifacts, expandedId, onExpandedChange } = props;
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const touchCanvas = useTouchCanvas();
   // Figma-style focus: an unfocused tile is a non-interactive preview. A
   // focused tile drops the body's pointer-events: none guard and surfaces a
   // floating head (positioned in screen space, see below) so the controls
@@ -159,77 +294,73 @@ export function Canvas(props: {
   const [sizeOverrides, setSizeOverrides] = useState<SizeMap>(() =>
     loadStoredSizes(),
   );
-  // Track the canvas wrapper's clientWidth so the column count can flex
-  // with the visible viewport. Without this the layout was hardcoded to
-  // 2 columns and left big empty gutters on wide screens. Initialize from
-  // window.innerWidth as a usable pre-mount guess; the ResizeObserver
-  // below corrects it once the wrapper is laid out.
+  // Track the canvas wrapper's clientWidth so fit/visibility can respond
+  // when the browser, drawer, or split-view size changes. The artifact
+  // layout itself intentionally does not collapse by viewport: this is a
+  // canvas/board, so it fills a row of roughly 10 artifacts before wrapping.
   const [wrapWidth, setWrapWidth] = useState<number>(() =>
     typeof window !== "undefined" ? window.innerWidth : 1600,
   );
-  // Row-flow layout. Column count flexes with the wrapper width so wide
-  // viewports actually use the available horizontal space (instead of a
-  // fixed 2-col grid that left a big right-side gap). Tiles get placed
-  // left-to-right and wrap when the next tile won't fit. Row height =
-  // max height of tiles in that row, so a taller (resized) tile pushes
-  // the next row down without overlapping. A tile wider than the
-  // baseline takes the row to itself and stretches the canvas.
-  const fittingCols = Math.floor((wrapWidth - GAP) / (TILE_W + GAP));
-  const COLS = Math.max(MIN_COLS, Math.min(MAX_COLS, fittingCols));
-  const baselineRowWidth = COLS * TILE_W + (COLS + 1) * GAP;
-  type LaidOut = {
-    id: string;
-    rec: ArtifactRecord;
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  };
-  const tiles: LaidOut[] = [];
-  let cursorX = GAP;
-  let cursorY = GAP;
-  let rowMaxH = 0;
-  let layoutMaxRight = 0;
-  for (const [id, rec] of artifacts) {
-    // Size precedence:
-    //   user override > image natural (aspect-fit) > agent-suggested > default
-    // Natural pixels are intrinsic to the file — when we have them they are
-    // a better source of truth than an agent's dimension hint, which is
-    // a guess and can be aspect-wrong (e.g. an agent passing 720×1100 for
-    // a landscape PNG, which letterboxes inside a portrait tile). Suggested
-    // remains the fallback for old artifacts that predate the natural-dim
-    // probe. MIN_TILE_W/H floors keep
-    // a tiny image from collapsing to an unusable size.
-    const ov = sizeOverrides[sizeKey(rec)];
-    const natural = naturalDefault(rec);
-    const w =
-      ov?.w ??
-      natural?.w ??
-      (rec.suggestedWidth != null
-        ? Math.max(MIN_TILE_W, rec.suggestedWidth)
-        : TILE_W);
-    const h =
-      ov?.h ??
-      natural?.h ??
-      (rec.suggestedHeight != null
-        ? Math.max(MIN_TILE_H, rec.suggestedHeight)
-        : TILE_H);
-    // Wrap when this tile doesn't fit in the remaining row width. The
-    // `cursorX > GAP` guard prevents an empty wrap when the tile alone is
-    // wider than baselineRowWidth — it just takes the row.
-    if (cursorX > GAP && cursorX + w + GAP > baselineRowWidth) {
-      cursorX = GAP;
-      cursorY += rowMaxH + GAP;
-      rowMaxH = 0;
+  // Board layout. Tiles get placed left-to-right with a target of 10 items
+  // per row, then wrap. We also wrap early if a resized/wide tile would
+  // exceed the baseline row width, which avoids overlap while preserving the
+  // user's requested "about ten across" structure for normal-sized items.
+  // Row height = max height of tiles in that row, so tall/resized tiles push
+  // the next row down without collisions.
+  const baselineRowWidth =
+    ROW_ITEM_TARGET * TILE_W + (ROW_ITEM_TARGET + 1) * GAP;
+  const layout = useMemo(() => {
+    const tiles: LaidOut[] = [];
+    let cursorX = GAP;
+    let cursorY = GAP;
+    let rowItemCount = 0;
+    let rowMaxH = 0;
+    let layoutMaxRight = 0;
+    for (const [id, rec] of artifacts) {
+      // Size precedence:
+      //   user override > image natural (aspect-fit) > agent-suggested > default
+      // Natural pixels are intrinsic to the file — when we have them they are
+      // a better source of truth than an agent's dimension hint. Suggested
+      // remains the fallback for old artifacts that predate the natural-dim
+      // probe.
+      const ov = sizeOverrides[sizeKey(rec)];
+      const natural = naturalDefault(rec);
+      const w =
+        ov?.w ??
+        natural?.w ??
+        (rec.suggestedWidth != null
+          ? Math.max(MIN_TILE_W, rec.suggestedWidth)
+          : TILE_W);
+      const h =
+        ov?.h ??
+        natural?.h ??
+        (rec.suggestedHeight != null
+          ? Math.max(MIN_TILE_H, rec.suggestedHeight)
+          : TILE_H);
+      const shouldWrap =
+        cursorX > GAP &&
+        (rowItemCount >= ROW_ITEM_TARGET ||
+          cursorX + w + GAP > baselineRowWidth);
+      if (shouldWrap) {
+        cursorX = GAP;
+        cursorY += rowMaxH + GAP;
+        rowMaxH = 0;
+        rowItemCount = 0;
+      }
+      tiles.push({ id, rec, x: cursorX, y: cursorY, w, h });
+      cursorX += w + GAP;
+      rowItemCount += 1;
+      rowMaxH = Math.max(rowMaxH, h);
+      layoutMaxRight = Math.max(layoutMaxRight, cursorX);
     }
-    tiles.push({ id, rec, x: cursorX, y: cursorY, w, h });
-    cursorX += w + GAP;
-    rowMaxH = Math.max(rowMaxH, h);
-    layoutMaxRight = Math.max(layoutMaxRight, cursorX);
-  }
-  const layoutMaxBottom = cursorY + rowMaxH + GAP;
-  const canvasW = Math.max(baselineRowWidth, layoutMaxRight);
-  const canvasH = artifacts.length === 0 ? GAP * 2 + TILE_H : layoutMaxBottom;
+    const layoutMaxBottom = cursorY + rowMaxH + GAP;
+    return {
+      tiles,
+      canvasW: Math.max(baselineRowWidth, layoutMaxRight),
+      canvasH: artifacts.length === 0 ? GAP * 2 + TILE_H : layoutMaxBottom,
+    };
+  }, [artifacts, baselineRowWidth, sizeOverrides]);
+  const { tiles, canvasW, canvasH } = layout;
 
   // iPad Safari fires gesturestart/change/end for trackpad pinch. We cancel
   // them so Safari doesn't try to page-zoom the SPA. NOTE: iPadOS captures
@@ -238,7 +369,16 @@ export function Canvas(props: {
   // Cmd+= / Cmd+- / Cmd+0 (wired below) or the on-canvas toolbar instead.
   const wrapRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const floatingHeadRef = useRef<HTMLDivElement>(null);
+  const visibleFrameRef = useRef<number | null>(null);
+  const visibleTimerRef = useRef<number | null>(null);
+  const wheelIdleTimerRef = useRef<number | null>(null);
+  const movingTimerRef = useRef<number | null>(null);
+  const wheelPanTargetRef = useRef<WheelPanTarget | null>(null);
+  const lastGridScaleRef = useRef<number | null>(null);
+  const [visibleRect, setVisibleRect] = useState<CanvasRect | null>(null);
+  const visibleRectRef = useRef<CanvasRect | null>(null);
   // Latest pan+scale, mirrored as a ref so the rzpp callback can position
   // the floating head without triggering a React re-render every frame.
   const transformStateRef = useRef<{
@@ -250,6 +390,72 @@ export function Canvas(props: {
   const focusedRectRef = useRef<{ x: number; y: number; w: number } | null>(
     null,
   );
+
+  const refreshVisibleRect = () => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const next = visibleRectFromTransform(
+      transformStateRef.current,
+      wrap.clientWidth,
+      wrap.clientHeight,
+      touchCanvas ? TOUCH_VIRTUAL_OVERSCAN_SCREEN_PX : VIRTUAL_OVERSCAN_SCREEN_PX,
+    );
+    if (rectsClose(visibleRectRef.current, next)) return;
+    visibleRectRef.current = next;
+    setVisibleRect(next);
+  };
+
+  const scheduleVisibleRect = (delayMs = VISIBLE_RECT_IDLE_MS) => {
+    if (visibleTimerRef.current != null) {
+      window.clearTimeout(visibleTimerRef.current);
+      visibleTimerRef.current = null;
+    }
+    if (delayMs > 0) {
+      visibleTimerRef.current = window.setTimeout(() => {
+        visibleTimerRef.current = null;
+        scheduleVisibleRect(0);
+      }, delayMs);
+      return;
+    }
+    if (visibleFrameRef.current != null) return;
+    visibleFrameRef.current = requestAnimationFrame(() => {
+      visibleFrameRef.current = null;
+      refreshVisibleRect();
+    });
+  };
+
+  const markCanvasMoving = (idleMs = MOVING_IDLE_MS) => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    wrap.dataset.moving = "1";
+    if (movingTimerRef.current != null) {
+      window.clearTimeout(movingTimerRef.current);
+    }
+    movingTimerRef.current = window.setTimeout(() => {
+      movingTimerRef.current = null;
+      const latest = wrapRef.current;
+      if (latest) delete latest.dataset.moving;
+      scheduleVisibleRect(0);
+    }, idleMs);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (visibleTimerRef.current != null) {
+        window.clearTimeout(visibleTimerRef.current);
+      }
+      if (visibleFrameRef.current != null) {
+        cancelAnimationFrame(visibleFrameRef.current);
+      }
+      if (wheelIdleTimerRef.current != null) {
+        window.clearTimeout(wheelIdleTimerRef.current);
+      }
+      if (movingTimerRef.current != null) {
+        window.clearTimeout(movingTimerRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -265,6 +471,82 @@ export function Canvas(props: {
     };
   }, []);
 
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+
+    const onWheel = (event: WheelEvent) => {
+      // Let ctrlKey wheel events pass through to react-zoom-pan-pinch as
+      // pinch/zoom. Plain wheel/trackpad gestures are canvas pan.
+      if (event.ctrlKey || !canPanCanvas(wrap, event.target)) return;
+      const r = transformRef.current;
+      if (!r) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      markCanvasMoving(WHEEL_PAN_SEQUENCE_MS + WHEEL_PAN_SMOOTH_MS);
+
+      const now = performance.now();
+      const existing = wheelPanTargetRef.current;
+      const target =
+        existing && now - existing.lastAt < WHEEL_PAN_SEQUENCE_MS
+          ? existing
+          : {
+              x: r.state.positionX,
+              y: r.state.positionY,
+              lastAt: now,
+              frame: null,
+            };
+      const unit =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? 32
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? wrap.clientHeight
+            : 1;
+
+      target.x -= event.deltaX * unit * WHEEL_PAN_MULTIPLIER;
+      target.y -= event.deltaY * unit * WHEEL_PAN_MULTIPLIER;
+      target.lastAt = now;
+      wheelPanTargetRef.current = target;
+
+      if (wheelIdleTimerRef.current != null) {
+        window.clearTimeout(wheelIdleTimerRef.current);
+      }
+      wheelIdleTimerRef.current = window.setTimeout(() => {
+        wheelIdleTimerRef.current = null;
+        scheduleVisibleRect(0);
+      }, WHEEL_PAN_SEQUENCE_MS + WHEEL_PAN_SMOOTH_MS);
+
+      if (target.frame != null) return;
+      target.frame = requestAnimationFrame(() => {
+        target.frame = null;
+        const latest = transformRef.current;
+        if (!latest) return;
+        latest.setTransform(
+          target.x,
+          target.y,
+          latest.state.scale,
+          prefersReducedMotion ? 0 : WHEEL_PAN_SMOOTH_MS,
+          "easeOut",
+        );
+      });
+    };
+
+    const opts: AddEventListenerOptions = { capture: true, passive: false };
+    wrap.addEventListener("wheel", onWheel, opts);
+    return () => {
+      wrap.removeEventListener("wheel", onWheel, opts);
+      const target = wheelPanTargetRef.current;
+      if (target?.frame != null) cancelAnimationFrame(target.frame);
+      if (wheelIdleTimerRef.current != null) {
+        window.clearTimeout(wheelIdleTimerRef.current);
+        wheelIdleTimerRef.current = null;
+      }
+      wheelPanTargetRef.current = null;
+    };
+  }, [prefersReducedMotion]);
+
   // Track wrapper width for responsive column count. Sync once on mount
   // (replaces the window.innerWidth seed with the real laid-out width)
   // and again whenever the wrapper resizes — opening/closing the sidebar
@@ -276,7 +558,10 @@ export function Canvas(props: {
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const w = entry.contentRect.width;
-        if (w > 0) setWrapWidth(w);
+        if (w > 0) {
+          setWrapWidth(w);
+          scheduleVisibleRect(0);
+        }
       }
     });
     ro.observe(el);
@@ -321,6 +606,26 @@ export function Canvas(props: {
 
     const usableW = Math.max(1, openW - FIT_PADDING * 2);
     const usableH = Math.max(1, openH - FIT_PADDING * 2);
+    const first = tiles[0];
+    if (touchCanvas && first) {
+      // On phones, fitting the entire 10-wide board makes Safari decode and
+      // composite far more content than the user can inspect. Start at the
+      // first tile with a readable scale, then let panning/virtualization
+      // bring adjacent tiles in as needed.
+      const scale = Math.min(
+        MAX_SCALE,
+        Math.max(
+          MIN_SCALE,
+          Math.min(1, usableW / first.w, usableH / first.h),
+        ),
+      );
+      return {
+        x: paneInset + FIT_PADDING - first.x * scale,
+        y: FIT_PADDING - first.y * scale,
+        scale,
+      };
+    }
+
     const widthFit = usableW / contentW;
     const heightFit = usableH / contentH;
     let scale = Math.min(1, widthFit, heightFit);
@@ -377,7 +682,12 @@ export function Canvas(props: {
     const id = requestAnimationFrame(() => fitToContent());
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasW, canvasH, artifacts.length]);
+  }, [canvasW, canvasH, artifacts.length, touchCanvas]);
+
+  useEffect(() => {
+    scheduleVisibleRect(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasW, canvasH, touchCanvas, wrapWidth]);
 
   // Cmd/Ctrl + (= or +) / - / 0 → zoom in / out / fit. Provides a reliable
   // zoom path on iPad where trackpad pinch is eaten by the OS.
@@ -484,24 +794,48 @@ export function Canvas(props: {
       positionY: state.positionY,
       scale: state.scale,
     };
-    const wrap = wrapRef.current;
-    if (wrap) {
-      const gs = 24 * state.scale;
+    const grid = gridRef.current;
+    if (grid) {
+      const gs = Math.max(4, 24 * state.scale);
       // Modulo into [0, gs) so background-position values stay small and
       // the pattern wraps continuously instead of drifting forever.
       const ox = ((state.positionX % gs) + gs) % gs;
       const oy = ((state.positionY % gs) + gs) % gs;
-      wrap.style.setProperty("--grid-size", `${gs}px`);
-      wrap.style.setProperty("--grid-bg-x", `${ox}px`);
-      wrap.style.setProperty("--grid-bg-y", `${oy}px`);
+      if (
+        lastGridScaleRef.current == null ||
+        Math.abs(lastGridScaleRef.current - state.scale) > 0.002
+      ) {
+        lastGridScaleRef.current = state.scale;
+        grid.style.backgroundSize = `${gs}px ${gs}px`;
+        grid.style.inset = `-${gs}px`;
+      }
+      grid.style.transform = `translate3d(${ox}px, ${oy}px, 0)`;
     }
     positionFloatingHead();
+  };
+
+  const onTransformSettled = () => {
+    markCanvasMoving(80);
+    scheduleVisibleRect(0);
   };
 
   // Re-anchor the floating head whenever the focused tile changes (or the
   // layout that drives its rect changes). The transform itself is already
   // current in the ref — just apply it to the new rect.
   const focusedTile = focusedId ? tiles.find((t) => t.id === focusedId) : null;
+  const visibleTiles = useMemo(() => {
+    const initialLimit = touchCanvas
+      ? TOUCH_INITIAL_VISIBLE_TILE_LIMIT
+      : INITIAL_VISIBLE_TILE_LIMIT;
+    const base = visibleRect
+      ? tiles.filter((tile) => tileIntersectsRect(tile, visibleRect))
+      : tiles.slice(0, initialLimit);
+    if (focusedTile && !base.some((tile) => tile.id === focusedTile.id)) {
+      return [...base, focusedTile];
+    }
+    return base;
+  }, [focusedTile, tiles, touchCanvas, visibleRect]);
+
   useEffect(() => {
     focusedRectRef.current = focusedTile
       ? { x: focusedTile.x, y: focusedTile.y, w: focusedTile.w }
@@ -573,6 +907,7 @@ export function Canvas(props: {
 
   return (
     <div className="canvas-wrap" ref={wrapRef}>
+      <div className="canvas-grid" ref={gridRef} aria-hidden="true" />
       <TransformWrapper
         ref={transformRef}
         initialScale={initialFit.scale}
@@ -580,16 +915,42 @@ export function Canvas(props: {
         initialPositionY={initialFit.y}
         minScale={MIN_SCALE}
         maxScale={MAX_SCALE}
-        // wheelDisabled blocks plain-wheel zoom but still allows ctrlKey wheel
-        // (trackpad pinch). wheelPanning then turns plain scroll into a pan.
+        // wheelDisabled blocks plain-wheel zoom but still allows ctrlKey
+        // wheel (trackpad pinch). Plain wheel/trackpad panning is handled by
+        // the canvas wheel listener above so it can ease into position.
         wheel={{ step: 0.15, wheelDisabled: true }}
+        smooth={!prefersReducedMotion}
+        customTransform={canvasTransform}
         doubleClick={{ disabled: true }}
-        panning={{ velocityDisabled: true, wheelPanning: true }}
+        panning={{ velocityDisabled: prefersReducedMotion, wheelPanning: false }}
+        alignmentAnimation={{
+          disabled: prefersReducedMotion,
+          sizeX: 160,
+          sizeY: 160,
+          animationTime: PAN_ALIGNMENT_MS,
+          velocityAlignmentTime: PAN_INERTIA_MS,
+          animationType: "easeOut",
+        }}
+        velocityAnimation={{
+          disabled: prefersReducedMotion,
+          sensitivity: PAN_VELOCITY_SENSITIVITY,
+          animationTime: PAN_INERTIA_MS,
+          animationType: "easeOut",
+          equalToMove: true,
+        }}
         limitToBounds={false}
         onInit={(r) => {
           updateGrid(r.state);
           requestAnimationFrame(() => fitToContent(0));
         }}
+        onPanningStart={() => markCanvasMoving()}
+        onPanningStop={onTransformSettled}
+        onPinchingStart={() => markCanvasMoving()}
+        onPinchingStop={onTransformSettled}
+        onWheelStart={() => markCanvasMoving()}
+        onWheelStop={onTransformSettled}
+        onZoomStart={() => markCanvasMoving()}
+        onZoomStop={onTransformSettled}
         onTransformed={(_r, state) => updateGrid(state)}
       >
         {({ zoomIn, zoomOut }) => (
@@ -614,7 +975,7 @@ export function Canvas(props: {
                   height: canvasH,
                 }}
               >
-                {tiles.map(({ id, rec, x, y, w, h }) => (
+                {visibleTiles.map(({ id, rec, x, y, w, h }) => (
                   <TileWrapper
                     key={id}
                     artifactId={id}
@@ -716,7 +1077,7 @@ function TileWrapper(props: TileWrapperProps) {
   const tileStyle = props.expanded
     ? undefined
     : {
-        transform: `translate(${props.x}px, ${props.y}px)`,
+        transform: `translate3d(${props.x}px, ${props.y}px, 0)`,
         width: props.w,
         height: props.h,
       };
@@ -730,6 +1091,7 @@ function TileWrapper(props: TileWrapperProps) {
   // so the head stays readable when zoomed out.
   const isPreview = !props.expanded && !props.focused;
   const showInTileHead = !!props.expanded;
+  const previewWidth = props.expanded ? undefined : props.w;
 
   return (
     <div
@@ -777,7 +1139,12 @@ function TileWrapper(props: TileWrapperProps) {
             : undefined
         }
       >
-        <Tile artifactId={props.artifactId} record={props.record} />
+        <Tile
+          artifactId={props.artifactId}
+          record={props.record}
+          previewWidth={previewWidth}
+          zoomable={props.expanded}
+        />
       </div>
       {/* Resize handle is only meaningful for a focused, non-expanded tile;
           fullscreen has no concept of size, and previews swallow pointer

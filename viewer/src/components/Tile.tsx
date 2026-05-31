@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  TransformComponent,
+  TransformWrapper,
+} from "react-zoom-pan-pinch";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import { Minus, Plus } from "lucide-react";
 import { fetchArtifact } from "../api";
 import { parseMarkdownFrontmatter, type FrontmatterField } from "../frontmatter";
 import type { ArtifactRecord } from "../types";
+
+const TOUCH_CANVAS_QUERY = "(max-width: 900px), (pointer: coarse)";
+const MAX_CANVAS_PREVIEW_W = 1280;
+const MAX_TOUCH_CANVAS_PREVIEW_W = 720;
 
 function encodePath(entry: string): string {
   return entry.split("/").map(encodeURIComponent).join("/");
@@ -28,6 +37,25 @@ function artifactUrl(artifactId: string, record: ArtifactRecord): string {
   return cacheBust(base, record);
 }
 
+function imagePreviewUrl(
+  artifactId: string,
+  record: ArtifactRecord,
+  cssWidth: number | undefined,
+): string {
+  const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+  const maxWidth =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia(TOUCH_CANVAS_QUERY).matches
+      ? MAX_TOUCH_CANVAS_PREVIEW_W
+      : MAX_CANVAS_PREVIEW_W;
+  const requestedWidth = Math.min(
+    maxWidth,
+    Math.max(320, Math.ceil((cssWidth ?? 720) * dpr)),
+  );
+  return cacheBust(`/api/preview/${artifactId}?w=${requestedWidth}`, record);
+}
+
 function rewriteRelativeAsset(baseUrl: string, src: string | undefined): string | undefined {
   if (!src) return src;
   if (/^(?:[a-z][a-z0-9+.-]*:|#|\/)/i.test(src)) return src;
@@ -39,7 +67,12 @@ function isExternalHref(href: string | undefined): boolean {
   return /^(?:https?:|mailto:|tel:)/i.test(href) || href.startsWith("//");
 }
 
-export function Tile(props: { artifactId: string; record: ArtifactRecord }) {
+export function Tile(props: {
+  artifactId: string;
+  record: ArtifactRecord;
+  previewWidth?: number;
+  zoomable?: boolean;
+}) {
   const url = artifactUrl(props.artifactId, props.record);
   if (props.record.type === "html") {
     // Routed through HtmlTile so we can preserve scroll across hot reloads:
@@ -58,6 +91,7 @@ export function Tile(props: { artifactId: string; record: ArtifactRecord }) {
       <div className="tile-body pdf">
         <iframe
           sandbox="allow-scripts"
+          loading="lazy"
           src={url}
           title="artifact"
         />
@@ -65,13 +99,67 @@ export function Tile(props: { artifactId: string; record: ArtifactRecord }) {
     );
   }
   if (props.record.type === "png" || props.record.type === "jpg" || props.record.type === "webp") {
-    return (
-      <div className="tile-body image">
-        <img src={url} alt="artifact" />
-      </div>
+    const imageUrl = props.previewWidth
+      ? imagePreviewUrl(props.artifactId, props.record, props.previewWidth)
+      : url;
+    return props.zoomable ? (
+      <ZoomableImage src={imageUrl} />
+    ) : (
+      <ImageBody src={imageUrl} />
     );
   }
   return <MarkdownTile artifactId={props.artifactId} url={url} />;
+}
+
+function ImageBody(props: { src: string }) {
+  return (
+    <div className="tile-body image">
+      <img src={props.src} alt="artifact" loading="lazy" decoding="async" />
+    </div>
+  );
+}
+
+function ZoomableImage(props: { src: string }) {
+  return (
+    <div className="tile-body image image-zoom">
+      <TransformWrapper
+        minScale={1}
+        maxScale={8}
+        initialScale={1}
+        centerOnInit
+        limitToBounds={false}
+        smooth
+        wheel={{ step: 0.12 }}
+        doubleClick={{ mode: "toggle", step: 1.6, animationTime: 180 }}
+        panning={{ velocityDisabled: false }}
+        alignmentAnimation={{ disabled: true }}
+      >
+        {({ zoomIn, zoomOut, resetTransform }) => (
+          <>
+            <div className="image-zoom-toolbar" aria-label="image zoom controls">
+              <button onClick={() => zoomOut()} aria-label="zoom out" title="zoom out">
+                <Minus size={16} strokeWidth={2} />
+              </button>
+              <button onClick={() => resetTransform(180)} title="fit">
+                fit
+              </button>
+              <button onClick={() => zoomIn()} aria-label="zoom in" title="zoom in">
+                <Plus size={16} strokeWidth={2} />
+              </button>
+            </div>
+            <TransformComponent
+              wrapperStyle={{ width: "100%", height: "100%" }}
+              contentStyle={{ width: "100%", height: "100%" }}
+            >
+              <div className="image-zoom-content">
+                <img src={props.src} alt="artifact" decoding="async" />
+              </div>
+            </TransformComponent>
+          </>
+        )}
+      </TransformWrapper>
+    </div>
+  );
 }
 
 function HtmlTile(props: { baseSrc: string }) {
@@ -118,6 +206,7 @@ function HtmlTile(props: { baseSrc: string }) {
         ref={iframeRef}
         sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         allow="clipboard-write"
+        loading="lazy"
         src={src}
         title="artifact"
       />

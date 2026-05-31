@@ -12,6 +12,7 @@ import { readImageDims } from "./imageDims.js";
 export const LOCAL_ARTIFACTS_REL = path.join(".agentuse", "artifacts");
 const LOCAL_ARTIFACTS_POSIX = ".agentuse/artifacts";
 const PROJECT_FILE_ID_PREFIX = "project:";
+const IMAGE_HEADER_BYTES = 256 * 1024;
 
 const IGNORED_PROJECT_DIR_NAMES = new Set([
   ".git",
@@ -439,7 +440,7 @@ function makeLocalArtifact(opts: {
   if (localEntry) record.localEntry = localEntry;
   if (type === "png" || type === "jpg" || type === "webp") {
     try {
-      const dims = readImageDims(type, fs.readFileSync(absPath));
+      const dims = readImageDims(type, readFilePrefix(absPath, stat.size));
       if (dims) {
         record.naturalWidth = dims.width;
         record.naturalHeight = dims.height;
@@ -449,6 +450,19 @@ function makeLocalArtifact(opts: {
     }
   }
   return { artifactId, record, entry, absPath, projectRelPath };
+}
+
+function readFilePrefix(absPath: string, size: number): Buffer {
+  const len = Math.min(Math.max(0, size), IMAGE_HEADER_BYTES);
+  if (len === 0) return Buffer.alloc(0);
+  const fd = fs.openSync(absPath, "r");
+  try {
+    const buf = Buffer.allocUnsafe(len);
+    const bytesRead = fs.readSync(fd, buf, 0, len, 0);
+    return bytesRead === len ? buf : buf.subarray(0, bytesRead);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 export function findLocalArtifactById(artifactId: string): LocalArtifact | undefined {

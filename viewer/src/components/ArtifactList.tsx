@@ -117,7 +117,16 @@ function makeFolder(name: string, path: string): FolderNode {
   };
 }
 
-function buildProjectTree(records: ArtifactRecord[]): FolderNode {
+function sortFolder(node: FolderNode, sort: SortMode): void {
+  node.files.sort(compareRecords(sort));
+  const children = [...node.children.values()].sort(compareFolders(sort));
+  node.children = new Map(children.map((child) => {
+    sortFolder(child, sort);
+    return [child.name, child];
+  }));
+}
+
+function buildProjectTree(records: ArtifactRecord[], sort: SortMode): FolderNode {
   const root = makeFolder("", "");
   for (const rec of records) {
     const rel = rec.projectRelPath ?? rec.name;
@@ -144,7 +153,7 @@ function buildProjectTree(records: ArtifactRecord[]): FolderNode {
     }
     node.files.push(rec);
   }
-  root.files.sort(compareRecords("name"));
+  sortFolder(root, sort);
   return root;
 }
 
@@ -164,11 +173,21 @@ export function ArtifactList(props: {
   const { manifest, projectId, selected, selectedGroup, sort, onSelect, onSelectGroup } = props;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const latestMap = projectId ? manifest.latest[projectId] ?? {} : {};
-  const artifacts = Object.values(latestMap)
-    .map((id) => manifest.artifacts[id])
-    .filter((rec): rec is ArtifactRecord => !!rec);
-  const packageArtifacts = artifacts.filter((rec) => !!rec.localEntry);
-  const projectArtifacts = artifacts.filter((rec) => !rec.localEntry);
+  const artifacts = useMemo(
+    () =>
+      Object.values(latestMap)
+        .map((id) => manifest.artifacts[id])
+        .filter((rec): rec is ArtifactRecord => !!rec),
+    [latestMap, manifest.artifacts],
+  );
+  const packageArtifacts = useMemo(
+    () => artifacts.filter((rec) => !!rec.localEntry),
+    [artifacts],
+  );
+  const projectArtifacts = useMemo(
+    () => artifacts.filter((rec) => !rec.localEntry),
+    [artifacts],
+  );
 
   const packageGroups = useMemo(() => {
     const groups = new Map<string, ArtifactRecord[]>();
@@ -194,7 +213,10 @@ export function ArtifactList(props: {
     return entries;
   }, [packageArtifacts, sort]);
 
-  const projectTree = useMemo(() => buildProjectTree(projectArtifacts), [projectArtifacts]);
+  const projectTree = useMemo(
+    () => buildProjectTree(projectArtifacts, sort),
+    [projectArtifacts, sort],
+  );
   const projectSelection = selectedProjectPath(selectedGroup);
   const allSelected = selected == null && selectedGroup == null;
 
@@ -232,8 +254,8 @@ export function ArtifactList(props: {
   );
 
   const renderFolder = (node: FolderNode, depth: number): JSX.Element => {
-    const children = [...node.children.values()].sort(compareFolders(sort));
-    const files = [...node.files].sort(compareRecords(sort));
+    const children = [...node.children.values()];
+    const files = node.files;
     const isSelected = selectedGroup === projectGroupKey(node.path);
     const isOpen = expanded.has(node.path) || isAncestorPath(node.path, projectSelection);
 

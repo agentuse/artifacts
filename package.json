@@ -53,7 +53,8 @@
   },
   "dependencies": {
     "commander": "^12.1.0",
-    "node-html-parser": "^6.1.13"
+    "node-html-parser": "^6.1.13",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",

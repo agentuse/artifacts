@@ -68,6 +68,7 @@ html, body, #root {
 .app {
   position: relative;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -85,12 +86,14 @@ html, body, #root {
   grid-template-columns: 240px 280px;
   grid-template-rows: auto 1fr;
   overflow: hidden;
-  transform: translateX(0);
+  transform: translate3d(0, 0, 0);
   opacity: 1;
   box-shadow: var(--shadow-drawer);
+  backface-visibility: hidden;
+  will-change: transform, opacity;
   transition:
-    transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
-    opacity 180ms ease;
+    transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 180ms ease-out;
 }
 
 /* Shared sort row across both panes. The floating menu/close button sits at
@@ -111,7 +114,7 @@ html, body, #root {
 }
 .app.panes-hidden .drawer {
   pointer-events: none;
-  transform: translateX(-100%);
+  transform: translate3d(-100%, 0, 0);
   opacity: 0;
 }
 .backdrop { display: none; }
@@ -149,6 +152,9 @@ html, body, #root {
   border-right: 1px solid var(--border);
   background: var(--pane-bg);
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Section labels styled like terminal-style monospace tags, echoing the
@@ -338,12 +344,15 @@ html, body, #root {
   position: relative;
   width: 100%;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--bg);
   /* Page pinch-zoom is already blocked via the viewport meta. Don't set
      touch-action: none here — it cascades through the ancestor chain and
      would kill native scroll inside iframe artifacts on iPad Safari. */
   overscroll-behavior: contain;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .canvas {
   width: 100%;
@@ -362,14 +371,30 @@ html, body, #root {
   text-transform: uppercase;
 }
 
-/* Hybrid dot grid: rendered on the un-transformed canvas-wrap so the GPU
-   doesn't repaint a transformed background during pan, but --grid-size and
-   --grid-bg-x/y are fed from the live zoom-pan state in Canvas.tsx so the
-   pattern appears to glide with the canvas and breathe with zoom (Figma). */
-.canvas-wrap {
+/* Hybrid dot grid: a separate composited layer. Pan moves this layer via
+   translate3d instead of repainting background-position on the canvas. */
+.canvas-grid {
+  position: absolute;
+  inset: -24px;
+  z-index: 0;
+  pointer-events: none;
   background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1px);
-  background-size: var(--grid-size, 24px) var(--grid-size, 24px);
-  background-position: var(--grid-bg-x, 0) var(--grid-bg-y, 0);
+  background-size: 24px 24px;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+  backface-visibility: hidden;
+  contain: strict;
+}
+
+.canvas-wrap > .react-transform-wrapper {
+  position: relative;
+  z-index: 1;
+}
+.react-transform-wrapper,
+.react-transform-component {
+  will-change: transform;
+  backface-visibility: hidden;
+  transform-style: preserve-3d;
 }
 
 .tile {
@@ -391,7 +416,8 @@ html, body, #root {
   flex-direction: column;
   transition: transform 240ms cubic-bezier(0.22, 0.8, 0.24, 1),
               border-color 120ms ease;
-  will-change: transform;
+  backface-visibility: hidden;
+  contain: layout paint style;
 }
 .tile:hover {
   border-color: var(--border-strong);
@@ -417,6 +443,7 @@ html, body, #root {
   .drawer,
   .menu-btn,
   .icon-btn,
+  .image-zoom-toolbar button,
   .toolbar button { transition: none; }
 }
 
@@ -561,6 +588,21 @@ html, body, #root {
   box-shadow: 0 0 0 4px var(--accent-soft), 0 12px 32px -12px rgba(0, 0, 0, 0.4);
 }
 
+.canvas-wrap[data-moving="1"] .tile:not(.tile-expanded) {
+  box-shadow: none;
+  transition: none;
+}
+
+.canvas-wrap[data-moving="1"] .tile.tile-focused:not(.tile-expanded) {
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.canvas-wrap[data-moving="1"] .tile-head-floating {
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 /* Bottom-right corner grip for the focused tile. Sits above the body so it
    catches pointerdown before the body content does. The diagonal stripes
    are a CSS gradient — no extra DOM. Sized for finger-tap (≈44px hit
@@ -651,6 +693,58 @@ html, body, #root {
   min-height: 0;
   object-fit: contain;
   object-position: center;
+}
+.tile-body.image-zoom {
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+}
+.tile-body.image-zoom:active {
+  cursor: grabbing;
+}
+.image-zoom-content {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.image-zoom-toolbar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--pane-bg-elev);
+  box-shadow: var(--shadow-float);
+}
+.image-zoom-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--tile-bg);
+  color: var(--fg);
+  font: inherit;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.image-zoom-toolbar button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.image-zoom-toolbar button:active {
+  background: var(--accent-soft);
 }
 
 /* ----- Markdown rendering ----- */
@@ -926,6 +1020,32 @@ html, body, #root {
   transform: scale(0.96);
 }
 
+/* ---- Touch / narrow viewports (iPad portrait, split view, phones) ---- */
+@media (max-width: 900px), (pointer: coarse) {
+  .react-transform-wrapper,
+  .react-transform-component {
+    will-change: auto;
+    transform-style: flat;
+  }
+  .tile:not(.tile-expanded) {
+    box-shadow: none;
+  }
+  .tile.tile-focused:not(.tile-expanded) {
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+  .tile:not(.tile-expanded):not(.tile-focused):hover {
+    border-color: var(--border);
+  }
+  .toolbar button {
+    box-shadow: none;
+  }
+  .tile-head-floating {
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 /* ---- Narrow viewports (iPad portrait, split view, phones) ---- */
 @media (max-width: 900px) {
   .app {
@@ -935,6 +1055,7 @@ html, body, #root {
   .canvas-wrap {
     width: 100%;
     height: 100vh;
+    height: 100dvh;
   }
   /* Drawer overlays from the left and stacks the navigation panes. */
   .drawer {
@@ -948,17 +1069,17 @@ html, body, #root {
     z-index: 100;
     background: var(--pane-bg);
     border-right: 1px solid var(--border);
-    transform: translateX(-100%);
+    transform: translate3d(-100%, 0, 0);
     opacity: 1;
     transition:
-      transform 260ms cubic-bezier(0.22, 0.8, 0.24, 1),
-      opacity 180ms ease;
+      transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 180ms ease-out;
     box-shadow: var(--shadow-drawer);
   }
-  .app.drawer-open .drawer { transform: translateX(0); }
+  .app.drawer-open .drawer { transform: translate3d(0, 0, 0); }
   .app.panes-hidden .drawer {
     pointer-events: none;
-    transform: translateX(-100%);
+    transform: translate3d(-100%, 0, 0);
     opacity: 0;
   }
   .drawer .pane {
