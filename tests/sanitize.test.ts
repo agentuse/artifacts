@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildSafeSrcdoc, scrubHtml, META_CSP, ARTIFACT_RUNTIME_SHIM } from "../src/sanitize";
+import {
+  ARTIFACT_DEFAULT_STYLE,
+  ARTIFACT_RUNTIME_SHIM,
+  buildSafeSrcdoc,
+  META_CSP,
+  scrubHtml,
+} from "../src/sanitize";
 
 describe("scrubHtml", () => {
   it("strips meta http-equiv=refresh", () => {
@@ -69,10 +75,20 @@ describe("buildSafeSrcdoc", () => {
     const out = buildSafeSrcdoc(`<html><head><title>t</title></head><body>x</body></html>`);
     expect(out).toContain(`http-equiv="Content-Security-Policy"`);
     expect(out).toContain(META_CSP);
+    expect(out).toContain(ARTIFACT_DEFAULT_STYLE);
     expect(out).toContain(ARTIFACT_RUNTIME_SHIM);
     expect(out.indexOf(`http-equiv="Content-Security-Policy"`)).toBeLessThan(
+      out.indexOf(ARTIFACT_DEFAULT_STYLE),
+    );
+    expect(out.indexOf(ARTIFACT_DEFAULT_STYLE)).toBeLessThan(
       out.indexOf(ARTIFACT_RUNTIME_SHIM),
     );
+  });
+
+  it("gives HTML artifacts a white default page background", () => {
+    const out = buildSafeSrcdoc(`<html><head></head><body><h1>Report</h1></body></html>`);
+    expect(out).toContain(`html{background:#fff;color-scheme:light;}`);
+    expect(out).toContain(`body{background:#fff;}`);
   });
 
   it("creates <head> if missing", () => {

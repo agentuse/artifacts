@@ -210,6 +210,14 @@ export const ARTIFACT_SCROLL_SHIM = `<script>
 })();
 </script>`;
 
+// HTML artifacts often omit a page background because browsers normally paint
+// documents white. In the viewer they live inside dark-mode tiles, so a
+// transparent iframe document can look incorrectly dark. Inject this before
+// authored styles: it restores the browser-like white page default, while
+// still letting explicit artifact CSS override it.
+export const ARTIFACT_DEFAULT_STYLE =
+  `<style id="agentuse-artifact-defaults">html{background:#fff;color-scheme:light;}body{background:#fff;}</style>`;
+
 const PRELOAD_REL = new Set(["preload", "prefetch", "dns-prefetch", "preconnect", "modulepreload"]);
 
 /**
@@ -283,7 +291,7 @@ function shouldRemove(tag: string, el: HTMLElement): boolean {
 export function buildSafeSrcdoc(input: string): string {
   const scrubbed = scrubHtml(input);
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${META_CSP}">`;
-  const headInjection = cspMeta + ARTIFACT_RUNTIME_SHIM + ARTIFACT_SCROLL_SHIM;
+  const headInjection = cspMeta + ARTIFACT_DEFAULT_STYLE + ARTIFACT_RUNTIME_SHIM + ARTIFACT_SCROLL_SHIM;
 
   // If the document has a <head>, inject as the first child of head; otherwise
   // prepend a synthetic <head>.
