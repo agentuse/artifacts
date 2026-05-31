@@ -144,16 +144,17 @@ export function Tile(props: {
     props.record.type === "jpg" ||
     props.record.type === "webp";
 
-  if (props.preview && (props.record.type === "markdown" || props.record.type === "agentuse")) {
-    return <MarkdownPreview artifactId={props.artifactId} url={url} record={props.record} />;
-  }
-
   if (props.preview && props.record.type === "html") {
     const baseSrc = props.record.local ? url : `/api/render/${props.artifactId}`;
     return <HtmlTile baseSrc={baseSrc} preview />;
   }
 
-  if (props.preview && !isImage) {
+  if (
+    props.preview &&
+    !isImage &&
+    props.record.type !== "markdown" &&
+    props.record.type !== "agentuse"
+  ) {
     return <PreviewBody record={props.record} />;
   }
 
@@ -231,72 +232,6 @@ function PreviewBody(props: { record: ArtifactRecord }) {
       <div className="lod-preview-type">{artifactTypeLabel(props.record.type)}</div>
       <div className="lod-preview-name">{name}</div>
       {parent ? <div className="lod-preview-path">{parent}</div> : null}
-    </div>
-  );
-}
-
-function MarkdownPreview(props: {
-  artifactId: string;
-  url: string;
-  record: ArtifactRecord;
-}) {
-  const [content, setContent] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    cachedFetchArtifact(props.url)
-      .then((c) => {
-        if (alive) setContent(c);
-      })
-      .catch(() => {
-        if (alive) setContent("");
-      });
-    return () => {
-      alive = false;
-    };
-  }, [props.artifactId, props.url]);
-
-  const parsed = useMemo(
-    () => (content == null ? null : parseMarkdownFrontmatter(content)),
-    [content],
-  );
-
-  return (
-    <div className="tile-body markdown-preview">
-      <div className="preview-kicker">{artifactTypeLabel(props.record.type)}</div>
-      <Frontmatter fields={parsed?.fields ?? []} />
-      <div className="markdown-preview-content">
-        {content == null ? (
-          <p>{artifactDisplayName(props.record)}</p>
-        ) : parsed?.body.trim() ? (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              img: ({ src, ...imgProps }) => (
-                <img
-                  {...imgProps}
-                  src={rewriteRelativeAsset(props.url, src)}
-                  loading="lazy"
-                />
-              ),
-              a: ({ href, children, ...anchorProps }) =>
-                isExternalHref(href) ? (
-                  <a {...anchorProps} href={href} target="_blank" rel="noopener noreferrer">
-                    {children}
-                  </a>
-                ) : (
-                  <a {...anchorProps} href={href}>
-                    {children}
-                  </a>
-                ),
-            }}
-          >
-            {parsed.body}
-          </ReactMarkdown>
-        ) : (
-          <p>{artifactDisplayName(props.record)}</p>
-        )}
-      </div>
     </div>
   );
 }
@@ -414,7 +349,7 @@ function MarkdownTile(props: { artifactId: string; url: string }) {
     // file's contentHash changes (hot reload), and blanking would collapse
     // the scrollable container's height, losing the user's scroll position
     // mid-read. Keep showing the previous content until the new fetch resolves.
-    fetchArtifact(props.url)
+    cachedFetchArtifact(props.url)
       .then((c) => {
         if (alive) {
           setContent(c);

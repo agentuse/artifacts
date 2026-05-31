@@ -762,51 +762,6 @@ html, body, #root {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.preview-kicker {
-  color: var(--muted);
-  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  line-height: 1;
-  text-transform: uppercase;
-}
-.tile-body.markdown-preview {
-  padding: 34px 40px 48px;
-  overflow: hidden;
-  background: var(--tile-bg);
-}
-.markdown-preview-content {
-  margin-top: 18px;
-  color: var(--fg);
-  font-family: "Geist Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont,
-    "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-  font-size: 28px;
-  line-height: 1.2;
-}
-.markdown-preview-content > :first-child { margin-top: 0; }
-.markdown-preview-content > :last-child { margin-bottom: 0; }
-.markdown-preview-content h1,
-.markdown-preview-content h2,
-.markdown-preview-content h3 {
-  margin: 0 0 0.55em;
-  font-size: 1.25em;
-  line-height: 1.05;
-}
-.markdown-preview-content p,
-.markdown-preview-content ul,
-.markdown-preview-content ol,
-.markdown-preview-content blockquote {
-  margin: 0 0 0.7em;
-}
-.markdown-preview-content pre,
-.markdown-preview-content table {
-  max-width: 100%;
-  overflow: hidden;
-}
-.markdown-preview-content img {
-  max-width: 100%;
-  height: auto;
-}
 .tile-body.html-preview iframe {
   pointer-events: none;
 }
