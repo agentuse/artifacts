@@ -68,6 +68,7 @@ export interface ProjectManifest {
 
 export interface ViewerSettings {
   ignorePatterns: string[];
+  projectWideDiscoveryEnabled: boolean;
 }
 
 export interface SettingsResponse {

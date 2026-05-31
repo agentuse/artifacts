@@ -4,6 +4,7 @@ import { settingsPath } from "./paths.js";
 
 export interface ViewerSettings {
   ignorePatterns: string[];
+  projectWideDiscoveryEnabled: boolean;
 }
 
 export const DEFAULT_IGNORE_PATTERNS = [
@@ -44,12 +45,17 @@ export function readSettings(): ViewerSettings {
       ? (raw as ViewerSettings).ignorePatterns
       : DEFAULT_IGNORE_PATTERNS,
   );
-  return { ignorePatterns };
+  const projectWideDiscoveryEnabled =
+    typeof (raw as ViewerSettings).projectWideDiscoveryEnabled === "boolean"
+      ? (raw as ViewerSettings).projectWideDiscoveryEnabled
+      : true;
+  return { ignorePatterns, projectWideDiscoveryEnabled };
 }
 
 export function writeSettings(next: ViewerSettings): ViewerSettings {
   const settings: ViewerSettings = {
     ignorePatterns: normalizeIgnorePatterns(next.ignorePatterns),
+    projectWideDiscoveryEnabled: next.projectWideDiscoveryEnabled !== false,
   };
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
   const tmp = `${settingsPath()}.tmp.${process.pid}`;
@@ -59,7 +65,10 @@ export function writeSettings(next: ViewerSettings): ViewerSettings {
 }
 
 export function defaultSettings(): ViewerSettings {
-  return { ignorePatterns: [...DEFAULT_IGNORE_PATTERNS] };
+  return {
+    ignorePatterns: [...DEFAULT_IGNORE_PATTERNS],
+    projectWideDiscoveryEnabled: true,
+  };
 }
 
 export function normalizeIgnorePatterns(patterns: unknown[]): string[] {

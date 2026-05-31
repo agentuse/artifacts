@@ -1,6 +1,7 @@
 import type {
   ProjectInfo,
   SettingsResponse,
+  ViewerSettings,
   Manifest,
   ProjectIndex,
   ProjectManifest,
@@ -94,10 +95,10 @@ export async function fetchSettings(): Promise<SettingsResponse> {
   return jsonRequest<SettingsResponse>("/api/settings", { method: "GET" });
 }
 
-export async function updateSettings(ignorePatterns: string[]): Promise<SettingsResponse> {
+export async function updateSettings(settings: ViewerSettings): Promise<SettingsResponse> {
   return jsonRequest<SettingsResponse>("/api/settings", {
     method: "PUT",
-    body: JSON.stringify({ ignorePatterns }),
+    body: JSON.stringify(settings),
   });
 }
 

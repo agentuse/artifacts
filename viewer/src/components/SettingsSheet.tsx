@@ -19,8 +19,26 @@ export function SettingsSheet(props: {
 }) {
   const [defaultPatterns, setDefaultPatterns] = useState<string[]>([]);
   const [ignoreText, setIgnoreText] = useState("");
+  const [projectWideDiscoveryEnabled, setProjectWideDiscoveryEnabled] = useState(true);
   const [projectPath, setProjectPath] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(props.open);
+  const [closing, setClosing] = useState(false);
+
+  useEffect(() => {
+    if (props.open) {
+      setMounted(true);
+      setClosing(false);
+      return;
+    }
+    if (!mounted) return;
+    setClosing(true);
+    const id = window.setTimeout(() => {
+      setMounted(false);
+      setClosing(false);
+    }, 220);
+    return () => window.clearTimeout(id);
+  }, [props.open, mounted]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -30,6 +48,7 @@ export function SettingsSheet(props: {
         if (!alive) return;
         setDefaultPatterns(res.defaultIgnorePatterns);
         setIgnoreText(res.settings.ignorePatterns.join("\n"));
+        setProjectWideDiscoveryEnabled(res.settings.projectWideDiscoveryEnabled);
       })
       .catch((e) => {
         if (alive) props.onNotify("error", String(e));
@@ -57,8 +76,9 @@ export function SettingsSheet(props: {
     () => new Set(Object.keys(props.manifest.latest)),
     [props.manifest.latest],
   );
+  const patternsDisabled = !projectWideDiscoveryEnabled;
 
-  if (!props.open) return null;
+  if (!mounted) return null;
 
   const run = async (label: string, task: () => Promise<void>, success: string) => {
     setBusy(label);
@@ -77,9 +97,12 @@ export function SettingsSheet(props: {
     run(
       "patterns",
       async () => {
-        await updateSettings(ignoreText.split(/\r?\n/));
+        await updateSettings({
+          ignorePatterns: ignoreText.split(/\r?\n/),
+          projectWideDiscoveryEnabled,
+        });
       },
-      "Ignore patterns saved.",
+      "File scanning settings saved.",
     );
 
   const addCurrentProject = () => {
@@ -119,7 +142,12 @@ export function SettingsSheet(props: {
   };
 
   return (
-    <div className="settings-layer" role="dialog" aria-modal="true" aria-label="settings">
+    <div
+      className={"settings-layer" + (closing ? " closing" : "")}
+      role="dialog"
+      aria-modal="true"
+      aria-label="settings"
+    >
       <button className="settings-backdrop" onClick={props.onClose} aria-label="close settings" />
       <section className="settings-sheet">
         <header className="settings-head">
@@ -142,18 +170,40 @@ export function SettingsSheet(props: {
               className="settings-small-btn"
               type="button"
               onClick={() => setIgnoreText(defaultPatterns.join("\n"))}
+              disabled={patternsDisabled}
+              title={
+                patternsDisabled
+                  ? "Enable project-wide artifact discovery to edit ignore patterns"
+                  : "Reset ignore patterns"
+              }
             >
               <RotateCcw size={14} strokeWidth={2} />
               Reset
             </button>
           </div>
+          <label className="settings-toggle-row">
+            <span>
+              <strong>Project-wide artifact discovery</strong>
+              <span>Find Markdown, HTML, images, and PDFs anywhere in registered projects.</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={projectWideDiscoveryEnabled}
+              onChange={(e) => setProjectWideDiscoveryEnabled(e.target.checked)}
+            />
+          </label>
           <textarea
             className="settings-textarea"
             value={ignoreText}
             onChange={(e) => setIgnoreText(e.target.value)}
+            disabled={patternsDisabled}
             spellCheck={false}
             rows={9}
           />
+          <p className="settings-help">
+            Ignore patterns apply only to project-wide discovery. The dedicated `.agentuse/artifacts`
+            folder is always scanned.
+          </p>
           <div className="settings-actions">
             <button onClick={savePatterns} disabled={busy === "patterns"}>
               Save

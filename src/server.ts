@@ -466,7 +466,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         if (!Array.isArray(ignorePatterns)) {
           throw new CliError("INVALID_INPUT", "ignorePatterns must be an array");
         }
-        const settings = writeSettings({ ignorePatterns });
+        const projectWideDiscoveryEnabled =
+          typeof body.projectWideDiscoveryEnabled === "boolean"
+            ? body.projectWideDiscoveryEnabled
+            : readSettings().projectWideDiscoveryEnabled;
+        const settings = writeSettings({ ignorePatterns, projectWideDiscoveryEnabled });
         invalidateManifestCache();
         sendJson(res, { defaultIgnorePatterns: DEFAULT_IGNORE_PATTERNS, settings });
         return;

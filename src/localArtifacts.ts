@@ -243,8 +243,10 @@ export function listLocalArtifactsForProject(
     seenNames.add(artifact.record.name);
   }
 
-  for (const artifact of listProjectFileArtifacts(projectId, project, seenAbsPaths, seenNames)) {
-    artifacts.push(artifact);
+  if (readSettings().projectWideDiscoveryEnabled) {
+    for (const artifact of listProjectFileArtifacts(projectId, project, seenAbsPaths, seenNames)) {
+      artifacts.push(artifact);
+    }
   }
 
   return artifacts.sort((a, b) => a.record.name.localeCompare(b.record.name));
@@ -560,6 +562,10 @@ export function resolveProjectFile(projectId: string, relInput: string): {
 } {
   const project = readManifest().projects[projectId];
   if (!project) throw new CliError("INVALID_INPUT", `project not found: ${projectId}`);
+
+  if (!readSettings().projectWideDiscoveryEnabled) {
+    throw new CliError("INVALID_INPUT", "project-wide artifact discovery is disabled");
+  }
 
   const relPath = decodeArtifactPath(relInput);
   if (!isAllowedProjectRelPath(relPath)) {

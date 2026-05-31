@@ -10,7 +10,7 @@ import {
   listLocalArtifactsForProject,
   resolveProjectFile,
 } from "../src/localArtifacts";
-import { writeSettings } from "../src/settings";
+import { DEFAULT_IGNORE_PATTERNS, writeSettings } from "../src/settings";
 
 function writeFile(file: string, body = ""): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -103,7 +103,10 @@ describe("project-wide local artifact discovery", () => {
   });
 
   it("uses configured ignore patterns for project-wide discovery", () => {
-    writeSettings({ ignorePatterns: ["reports/private/**", "*.draft.md"] });
+    writeSettings({
+      ignorePatterns: ["reports/private/**", "*.draft.md"],
+      projectWideDiscoveryEnabled: true,
+    });
     writeFile(path.join(projectPath, "reports", "public", "summary.md"), "# Public");
     writeFile(path.join(projectPath, "reports", "private", "summary.md"), "# Private");
     writeFile(path.join(projectPath, "notes.draft.md"), "# Draft");
@@ -119,7 +122,23 @@ describe("project-wide local artifact discovery", () => {
     expect(isAllowedProjectRelPath(".agentuse/artifacts/private/index.md")).toBe(true);
   });
 
+  it("can disable project-wide discovery while keeping artifact-root discovery", () => {
+    writeSettings({
+      ignorePatterns: [],
+      projectWideDiscoveryEnabled: false,
+    });
+    writeFile(path.join(projectPath, "docs", "report.md"), "# Project report");
+    writeFile(path.join(projectPath, ".agentuse", "artifacts", "report", "index.md"), "# Artifact report");
+
+    const artifacts = listLocalArtifactsForProject(projectId, projectRecord());
+    expect(artifacts.map((a) => a.record.name)).toEqual(["report"]);
+  });
+
   it("resolves project files inside the project root only", () => {
+    writeSettings({
+      ignorePatterns: DEFAULT_IGNORE_PATTERNS,
+      projectWideDiscoveryEnabled: true,
+    });
     writeFile(path.join(projectPath, "docs", "report.html"), "<h1>Report</h1>");
     const manifest: Manifest = {
       schemaVersion: SCHEMA_VERSION,
