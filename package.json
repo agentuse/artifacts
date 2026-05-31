@@ -1,6 +1,6 @@
 {
   "name": "@agentuse/artifacts",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "CLI + viewer for collecting artifacts emitted by AI agents",
   "type": "module",
   "license": "MIT",

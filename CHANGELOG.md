@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.1 - 2026-05-31
+
+### Added
+
+- Added a project-wide discovery setting so teams can choose whether the viewer scans all supported files in registered project directories or stays limited to explicit artifact folders.
+
+### Improved
+
+- Improved fullscreen image zoom controls so image artifacts remain easier to inspect without unnecessary control noise.
+- Improved native Shift+wheel canvas panning so horizontal navigation works reliably across browser wheel event paths.
+
+### Fixed
+
+- Fixed embedded HTML artifacts intercepting native Shift+wheel events before the parent canvas could pan.
+
 ## 0.2.0 - 2026-05-31
 
 ### Added
