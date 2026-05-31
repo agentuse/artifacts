@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Menu, Settings, X } from "lucide-react";
-import { fetchManifestRaw } from "./api";
-import type { ArtifactRecord, Manifest } from "./types";
+import { fetchProjectManifestRaw, fetchProjects } from "./api";
+import type { ArtifactRecord, Manifest, ProjectIndex, ProjectManifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { ArtifactList, artifactMatchesGroup, latestGroupFor } from "./components/ArtifactList";
 import { Canvas } from "./components/Canvas";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { loadSort, saveSort, type SortMode } from "./sort";
+
+const MANIFEST_POLL_MS = 5_000;
 
 interface Route {
   projectId?: string;
@@ -56,8 +58,10 @@ function navRoute(r: Route, replace = false): void {
 }
 
 export function App() {
-  const [manifest, setManifest] = useState<Manifest | null>(null);
-  const manifestRawRef = useRef<string | null>(null);
+  const [projectIndex, setProjectIndex] = useState<ProjectIndex | null>(null);
+  const [projectManifest, setProjectManifest] = useState<ProjectManifest | null>(null);
+  const projectManifestRawRef = useRef<Record<string, string>>({});
+  const projectManifestEtagRef = useRef<Record<string, string | null>>({});
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.href));
   const [sort, setSortState] = useState<SortMode>(() => loadSort());
   const isMobileNav = useMediaQuery("(max-width: 900px)");
@@ -81,32 +85,56 @@ export function App() {
     setFlashedProjectId(projectId);
   }, []);
 
-  const refreshManifest = useCallback(async () => {
-    const raw = await fetchManifestRaw();
-    manifestRawRef.current = raw;
-    setManifest(JSON.parse(raw) as Manifest);
+  const refreshProjects = useCallback(async () => {
+    setProjectIndex(await fetchProjects());
   }, []);
 
-  // Initial fetch + 2s polling per spec.
   useEffect(() => {
     let alive = true;
+    fetchProjects()
+      .then((next) => {
+        if (alive) setProjectIndex(next);
+      })
+      .catch(() => {
+        /* show empty until a user-triggered refresh succeeds */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const refreshProjectManifest = useCallback(async (projectId: string) => {
+    const result = await fetchProjectManifestRaw(
+      projectId,
+      projectManifestEtagRef.current[projectId],
+    );
+    projectManifestEtagRef.current[projectId] = result.etag;
+    if (result.notModified || !result.raw) return;
+    if (result.raw === projectManifestRawRef.current[projectId]) return;
+    projectManifestRawRef.current[projectId] = result.raw;
+    setProjectManifest(JSON.parse(result.raw) as ProjectManifest);
+  }, []);
+
+  // Poll only the selected project's artifact inventory. The project index is
+  // loaded on open and refreshed after settings mutations, not on an interval.
+  useEffect(() => {
+    if (!route.projectId) return;
+    let alive = true;
+    const projectId = route.projectId;
     const tick = async () => {
       try {
-        const raw = await fetchManifestRaw();
-        if (!alive || raw === manifestRawRef.current) return;
-        manifestRawRef.current = raw;
-        setManifest(JSON.parse(raw) as Manifest);
+        await refreshProjectManifest(projectId);
       } catch {
-        /* show empty until next poll */
+        if (alive && projectManifest?.projectId === projectId) setProjectManifest(null);
       }
     };
-    tick();
-    const id = setInterval(tick, 2000);
+    void tick();
+    const id = setInterval(tick, MANIFEST_POLL_MS);
     return () => {
       alive = false;
       clearInterval(id);
     };
-  }, [refreshManifest]);
+  }, [refreshProjectManifest, route.projectId, projectManifest?.projectId]);
 
   useEffect(() => {
     const onPop = () => setRoute(parseRoute(window.location.href));
@@ -126,20 +154,44 @@ export function App() {
     return () => window.clearTimeout(id);
   }, [flashedProjectId]);
 
-  // Default selection on first manifest load: pick a project and land on
-  // its most-recently-updated folder so the user sees fresh work without an
-  // extra click. Falls back to "All" when the project has no folders.
+  // Default selection on first load: pick a project from the cheap index.
+  // Once that project's artifacts arrive, a separate effect lands on its
+  // most-recently-updated folder.
   useEffect(() => {
-    if (!manifest || route.projectId) return;
-    const projectIds = Object.keys(manifest.projects);
+    if (!projectIndex || route.projectId) return;
+    const projectIds = Object.keys(projectIndex.projects);
     const first = projectIds[0];
     if (first) {
-      const group = latestGroupFor(manifest, first);
-      const next: Route = { projectId: first, group };
+      const next: Route = { projectId: first };
       setRoute(next);
       navRoute(next);
     }
-  }, [manifest, route.projectId]);
+  }, [projectIndex, route.projectId]);
+
+  const manifest = useMemo<Manifest | null>(() => {
+    if (!projectIndex) return null;
+    const selectedProjectManifest =
+      projectManifest && projectManifest.projectId === route.projectId ? projectManifest : null;
+    return {
+      schemaVersion: projectIndex.schemaVersion,
+      projects: projectIndex.projects,
+      artifacts: selectedProjectManifest?.artifacts ?? {},
+      latest:
+        selectedProjectManifest && route.projectId
+          ? { [route.projectId]: selectedProjectManifest.latest }
+          : {},
+    };
+  }, [projectIndex, projectManifest, route.projectId]);
+
+  useEffect(() => {
+    if (!manifest || !route.projectId || route.artifactName || route.group != null) return;
+    if (projectManifest?.projectId !== route.projectId) return;
+    const group = latestGroupFor(manifest, route.projectId);
+    if (!group) return;
+    const next: Route = { ...route, group };
+    setRoute(next);
+    navRoute(next, true);
+  }, [manifest, projectManifest?.projectId, route]);
 
   const selectedArtifacts = useMemo<Array<[string, ArtifactRecord]>>(() => {
     if (!manifest || !route.projectId) return [];
@@ -164,13 +216,8 @@ export function App() {
 
   const onSelectProject = (projectId: string) => {
     if (!manifest) return;
-    // Auto-select the most-recently-updated folder for the new project so
-    // the user lands on fresh work. If there are no folders, fall back to
-    // "All".
-    const group = latestGroupFor(manifest, projectId);
     const next: Route = {
       projectId,
-      group,
       drawerOpen: route.drawerOpen,
       panesHidden: route.panesHidden,
     };
@@ -208,6 +255,14 @@ export function App() {
     setRoute(next);
     navRoute(next, true);
   };
+
+  const refreshVisibleData = useCallback(async () => {
+    await refreshProjects();
+    if (route.projectId) {
+      projectManifestEtagRef.current[route.projectId] = null;
+      await refreshProjectManifest(route.projectId);
+    }
+  }, [refreshProjectManifest, refreshProjects, route.projectId]);
 
   const setDrawerOpen = (open: boolean) => {
     // One menu button controls panes on every screen size. On desktop the
@@ -304,7 +359,7 @@ export function App() {
         manifest={manifest}
         flashedProjectId={flashedProjectId}
         onClose={() => setSettingsOpen(false)}
-        onChanged={refreshManifest}
+        onChanged={refreshVisibleData}
         onNotify={notify}
         onProjectAdded={flashProject}
       />

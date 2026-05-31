@@ -6,13 +6,15 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { CliError } from "./errors.js";
+import { SCHEMA_VERSION } from "./manifest.js";
 import { rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import {
-  buildLocalManifest,
-  findLocalArtifactById,
+  buildLocalProjectSnapshot,
+  buildLocalManifestSnapshot,
   forgetProject,
   initProject,
+  listRegisteredProjects,
   pruneMissingProjects,
   type LocalArtifact,
   resolveLocalProjectFile,
@@ -26,6 +28,7 @@ import {
 
 export const DEFAULT_PORT = 7878;
 const HOST = "127.0.0.1";
+const MANIFEST_CACHE_MS = 10_000;
 
 export interface ServeStatus {
   pid: number;
@@ -134,6 +137,114 @@ const BINARY_MIME: Record<string, string> = {
 const PREVIEW_WIDTHS = [320, 480, 720, 960, 1280, 1600, 2048];
 const PREVIEW_FORMAT = "webp";
 const PREVIEW_MIME = "image/webp";
+
+interface ManifestCache {
+  builtAt: number;
+  json: string;
+  etag: string;
+  localArtifacts: Map<string, LocalArtifact>;
+}
+
+interface ProjectCache {
+  builtAt: number;
+  json: string;
+  etag: string;
+  localArtifacts: Map<string, LocalArtifact>;
+}
+
+let manifestCache: ManifestCache | null = null;
+let manifestRefreshQueued = false;
+const projectCaches = new Map<string, ProjectCache>();
+const projectRefreshQueued = new Set<string>();
+
+function invalidateManifestCache(): void {
+  manifestCache = null;
+  manifestRefreshQueued = false;
+  projectCaches.clear();
+  projectRefreshQueued.clear();
+}
+
+function rebuildManifestCache(): ManifestCache {
+  const snapshot = buildLocalManifestSnapshot();
+  const json = JSON.stringify(snapshot.manifest);
+  manifestCache = {
+    builtAt: Date.now(),
+    json,
+    etag: `"${createHash("sha256").update(json).digest("base64url").slice(0, 24)}"`,
+    localArtifacts: snapshot.localArtifacts,
+  };
+  return manifestCache;
+}
+
+function queueManifestRefresh(): void {
+  if (manifestRefreshQueued) return;
+  manifestRefreshQueued = true;
+  setTimeout(() => {
+    try {
+      rebuildManifestCache();
+    } catch (e) {
+      console.warn(`manifest refresh failed: ${(e as Error).message}`);
+    } finally {
+      manifestRefreshQueued = false;
+    }
+  }, 0);
+}
+
+function getManifestCache(): ManifestCache {
+  if (!manifestCache) return rebuildManifestCache();
+  if (Date.now() - manifestCache.builtAt >= MANIFEST_CACHE_MS) {
+    queueManifestRefresh();
+  }
+  return manifestCache;
+}
+
+function getCachedLocalArtifactById(id: string): LocalArtifact | undefined {
+  for (const cache of projectCaches.values()) {
+    const artifact = cache.localArtifacts.get(id);
+    if (artifact) return artifact;
+  }
+  return getManifestCache().localArtifacts.get(id);
+}
+
+function buildProjectCache(projectId: string): ProjectCache {
+  const snapshot = buildLocalProjectSnapshot(projectId);
+  const json = JSON.stringify({
+    projectId,
+    artifacts: snapshot.artifacts,
+    latest: snapshot.latest,
+  });
+  const cache = {
+    builtAt: Date.now(),
+    json,
+    etag: `"${createHash("sha256").update(json).digest("base64url").slice(0, 24)}"`,
+    localArtifacts: snapshot.localArtifacts,
+  };
+  projectCaches.set(projectId, cache);
+  return cache;
+}
+
+function queueProjectRefresh(projectId: string): void {
+  if (projectRefreshQueued.has(projectId)) return;
+  projectRefreshQueued.add(projectId);
+  setTimeout(() => {
+    try {
+      buildProjectCache(projectId);
+    } catch (e) {
+      console.warn(`project manifest refresh failed: ${(e as Error).message}`);
+    } finally {
+      projectRefreshQueued.delete(projectId);
+    }
+  }, 0);
+}
+
+function getProjectCache(projectId: string): ProjectCache {
+  const cache = projectCaches.get(projectId);
+  if (!cache) return buildProjectCache(projectId);
+  if (Date.now() - cache.builtAt >= MANIFEST_CACHE_MS) {
+    queueProjectRefresh(projectId);
+  }
+  return cache;
+}
 
 const PROJECT_FILE_EXTENSIONS = new Set([
   ".html",
@@ -283,10 +394,59 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
 
   if (pathname === "/api/manifest") {
     try {
-      const m = buildLocalManifest();
-      send(res, 200, JSON.stringify(m), { "content-type": MIME[".json"]! });
+      const cache = getManifestCache();
+      if (req.headers["if-none-match"] === cache.etag) {
+        res.writeHead(304, {
+          "cache-control": "no-store",
+          "etag": cache.etag,
+          "x-content-type-options": "nosniff",
+        });
+        res.end();
+        return;
+      }
+      send(res, 200, cache.json, {
+        "content-type": MIME[".json"]!,
+        "etag": cache.etag,
+      });
     } catch (e) {
       send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  if (pathname === "/api/projects" && req.method === "GET") {
+    try {
+      sendJson(res, {
+        schemaVersion: SCHEMA_VERSION,
+        projects: Object.fromEntries(listRegisteredProjects()),
+      });
+    } catch (e) {
+      send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  const projectManifestMatch = /^\/api\/projects\/([^/]+)\/manifest$/.exec(pathname);
+  if (projectManifestMatch && req.method === "GET") {
+    try {
+      const projectId = decodeURIComponent(projectManifestMatch[1]!);
+      const cache = getProjectCache(projectId);
+      if (req.headers["if-none-match"] === cache.etag) {
+        res.writeHead(304, {
+          "cache-control": "no-store",
+          "etag": cache.etag,
+          "x-content-type-options": "nosniff",
+        });
+        res.end();
+        return;
+      }
+      send(res, 200, cache.json, {
+        "content-type": MIME[".json"]!,
+        "etag": cache.etag,
+      });
+    } catch (e) {
+      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 404 : 500;
+      send(res, code, (e as Error).message);
     }
     return;
   }
@@ -307,6 +467,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
           throw new CliError("INVALID_INPUT", "ignorePatterns must be an array");
         }
         const settings = writeSettings({ ignorePatterns });
+        invalidateManifestCache();
         sendJson(res, { defaultIgnorePatterns: DEFAULT_IGNORE_PATTERNS, settings });
         return;
       }
@@ -325,6 +486,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         throw new CliError("INVALID_INPUT", "path is required");
       }
       const out = await initProject(body.path);
+      invalidateManifestCache();
       sendJson(res, out);
     } catch (e) {
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
@@ -336,6 +498,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (pathname === "/api/projects/prune" && req.method === "POST") {
     try {
       const removed = await pruneMissingProjects();
+      invalidateManifestCache();
       sendJson(res, { removed });
     } catch (e) {
       send(res, 500, (e as Error).message);
@@ -347,6 +510,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (deleteProjectMatch && req.method === "DELETE") {
     try {
       const out = await forgetProject(decodeURIComponent(deleteProjectMatch[1]!));
+      invalidateManifestCache();
       sendJson(res, out);
     } catch (e) {
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
@@ -363,7 +527,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (previewMatch) {
     const id = previewMatch[1]!;
     try {
-      const local = findLocalArtifactById(id);
+      const local = getCachedLocalArtifactById(id);
       if (!local) {
         send(res, 404, "not found");
         return;
@@ -407,7 +571,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (artMatch) {
     const id = artMatch[1]!;
     try {
-      const local = findLocalArtifactById(id);
+      const local = getCachedLocalArtifactById(id);
       if (!local) {
         send(res, 404, "not found");
         return;
@@ -458,7 +622,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (rawMatch) {
     const id = rawMatch[1]!;
     try {
-      const local = findLocalArtifactById(id);
+      const local = getCachedLocalArtifactById(id);
       if (!local) {
         send(res, 404, "not found");
         return;
@@ -605,7 +769,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (renderMatch) {
     const id = renderMatch[1]!;
     try {
-      const local = findLocalArtifactById(id);
+      const local = getCachedLocalArtifactById(id);
       if (!local) {
         send(res, 404, "not found");
         return;

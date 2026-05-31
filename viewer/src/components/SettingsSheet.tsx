@@ -53,6 +53,11 @@ export function SettingsSheet(props: {
     return counts;
   }, [props.manifest.artifacts]);
 
+  const loadedProjectIds = useMemo(
+    () => new Set(Object.keys(props.manifest.latest)),
+    [props.manifest.latest],
+  );
+
   if (!props.open) return null;
 
   const run = async (label: string, task: () => Promise<void>, success: string) => {
@@ -195,7 +200,9 @@ export function SettingsSheet(props: {
                   <div className="settings-project-name">{project.name}</div>
                   <div className="settings-project-path">{project.path}</div>
                   <div className="settings-project-meta">
-                    {artifactCounts.get(projectId) ?? 0} artifacts
+                    {loadedProjectIds.has(projectId)
+                      ? `${artifactCounts.get(projectId) ?? 0} artifacts`
+                      : "artifacts load when selected"}
                   </div>
                 </div>
                 <button

@@ -55,6 +55,17 @@ export interface Manifest {
   latest: Record<string, Record<string, string>>;
 }
 
+export interface ProjectIndex {
+  schemaVersion: number;
+  projects: Record<string, ProjectRecord>;
+}
+
+export interface ProjectManifest {
+  projectId: string;
+  artifacts: Record<string, ArtifactRecord>;
+  latest: Record<string, string>;
+}
+
 export interface ViewerSettings {
   ignorePatterns: string[];
 }

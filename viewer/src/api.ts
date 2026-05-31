@@ -1,13 +1,74 @@
-import type { ProjectInfo, SettingsResponse, Manifest } from "./types";
+import type {
+  ProjectInfo,
+  SettingsResponse,
+  Manifest,
+  ProjectIndex,
+  ProjectManifest,
+} from "./types";
 
-export async function fetchManifestRaw(): Promise<string> {
-  const res = await fetch("/api/manifest", { cache: "no-store" });
+export interface ManifestFetchResult {
+  raw: string | null;
+  etag: string | null;
+  notModified: boolean;
+}
+
+export async function fetchManifestRaw(etag?: string | null): Promise<ManifestFetchResult> {
+  const res = await fetch("/api/manifest", {
+    cache: "no-store",
+    headers: etag ? { "if-none-match": etag } : undefined,
+  });
+  if (res.status === 304) {
+    return {
+      raw: null,
+      etag: res.headers.get("etag") ?? etag ?? null,
+      notModified: true,
+    };
+  }
   if (!res.ok) throw new Error(`manifest fetch failed: ${res.status}`);
-  return res.text();
+  return {
+    raw: await res.text(),
+    etag: res.headers.get("etag"),
+    notModified: false,
+  };
 }
 
 export async function fetchManifest(): Promise<Manifest> {
-  return JSON.parse(await fetchManifestRaw()) as Manifest;
+  const result = await fetchManifestRaw();
+  if (!result.raw) throw new Error("manifest fetch returned no content");
+  return JSON.parse(result.raw) as Manifest;
+}
+
+export async function fetchProjects(): Promise<ProjectIndex> {
+  return jsonRequest<ProjectIndex>("/api/projects", { method: "GET" });
+}
+
+export async function fetchProjectManifestRaw(
+  projectId: string,
+  etag?: string | null,
+): Promise<ManifestFetchResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/manifest`, {
+    cache: "no-store",
+    headers: etag ? { "if-none-match": etag } : undefined,
+  });
+  if (res.status === 304) {
+    return {
+      raw: null,
+      etag: res.headers.get("etag") ?? etag ?? null,
+      notModified: true,
+    };
+  }
+  if (!res.ok) throw new Error(`project manifest fetch failed: ${res.status}`);
+  return {
+    raw: await res.text(),
+    etag: res.headers.get("etag"),
+    notModified: false,
+  };
+}
+
+export async function fetchProjectManifest(projectId: string): Promise<ProjectManifest> {
+  const result = await fetchProjectManifestRaw(projectId);
+  if (!result.raw) throw new Error("project manifest fetch returned no content");
+  return JSON.parse(result.raw) as ProjectManifest;
 }
 
 export async function fetchArtifact(idOrUrl: string): Promise<string> {

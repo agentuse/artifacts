@@ -14,6 +14,7 @@ export const LOCAL_ARTIFACTS_REL = path.join(".agentuse", "artifacts");
 const LOCAL_ARTIFACTS_POSIX = ".agentuse/artifacts";
 const PROJECT_FILE_ID_PREFIX = "project:";
 const IMAGE_HEADER_BYTES = 256 * 1024;
+const imageDimsCache = new Map<string, { width: number; height: number } | null>();
 
 export interface LocalArtifact {
   artifactId: string;
@@ -21,6 +22,17 @@ export interface LocalArtifact {
   entry: string;
   absPath: string;
   projectRelPath: string;
+}
+
+export interface LocalManifestSnapshot {
+  manifest: Manifest;
+  localArtifacts: Map<string, LocalArtifact>;
+}
+
+export interface LocalProjectSnapshot {
+  artifacts: Record<string, ArtifactRecord>;
+  latest: Record<string, string>;
+  localArtifacts: Map<string, LocalArtifact>;
 }
 
 export function projectLocalArtifactsDir(projectPath: string): string {
@@ -157,6 +169,10 @@ function findRegisteredProject(
 }
 
 export function buildLocalManifest(): Manifest {
+  return buildLocalManifestSnapshot().manifest;
+}
+
+export function buildLocalManifestSnapshot(): LocalManifestSnapshot {
   const base = readManifest();
   const manifest: Manifest = {
     schemaVersion: base.schemaVersion,
@@ -164,16 +180,34 @@ export function buildLocalManifest(): Manifest {
     artifacts: {},
     latest: {},
   };
+  const localArtifacts = new Map<string, LocalArtifact>();
 
   for (const [projectId, project] of uniqueProjects(base)) {
     const artifacts = listLocalArtifactsForProject(projectId, project);
     if (artifacts.length > 0) manifest.latest[projectId] = {};
     for (const artifact of artifacts) {
       manifest.artifacts[artifact.artifactId] = artifact.record;
+      localArtifacts.set(artifact.artifactId, artifact);
       manifest.latest[projectId]![artifact.record.name] = artifact.artifactId;
     }
   }
-  return manifest;
+  return { manifest, localArtifacts };
+}
+
+export function buildLocalProjectSnapshot(projectId: string): LocalProjectSnapshot {
+  const base = readManifest();
+  const project = base.projects[projectId];
+  if (!project) throw new CliError("INVALID_INPUT", `project not found: ${projectId}`);
+
+  const artifacts: Record<string, ArtifactRecord> = {};
+  const latest: Record<string, string> = {};
+  const localArtifacts = new Map<string, LocalArtifact>();
+  for (const artifact of listLocalArtifactsForProject(projectId, project)) {
+    artifacts[artifact.artifactId] = artifact.record;
+    latest[artifact.record.name] = artifact.artifactId;
+    localArtifacts.set(artifact.artifactId, artifact);
+  }
+  return { artifacts, latest, localArtifacts };
 }
 
 export function listLocalArtifactsForCurrentProject(cwd = process.cwd()): {
@@ -205,7 +239,7 @@ export function listLocalArtifactsForProject(
 
   for (const artifact of listArtifactRootArtifacts(projectId, project)) {
     artifacts.push(artifact);
-    seenAbsPaths.add(canonicalPath(artifact.absPath));
+    seenAbsPaths.add(path.resolve(artifact.absPath));
     seenNames.add(artifact.record.name);
   }
 
@@ -369,7 +403,7 @@ function listProjectFileArtifacts(
         continue;
       }
 
-      const absKey = canonicalPath(abs);
+      const absKey = path.resolve(abs);
       if (seenAbsPaths.has(absKey)) continue;
       seenAbsPaths.add(absKey);
 
@@ -431,17 +465,34 @@ function makeLocalArtifact(opts: {
   };
   if (localEntry) record.localEntry = localEntry;
   if (type === "png" || type === "jpg" || type === "webp") {
-    try {
-      const dims = readImageDims(type, readFilePrefix(absPath, stat.size));
-      if (dims) {
-        record.naturalWidth = dims.width;
-        record.naturalHeight = dims.height;
-      }
-    } catch {
-      // ignore malformed image headers in listings
+    const dims = cachedImageDims(type, absPath, stat);
+    if (dims) {
+      record.naturalWidth = dims.width;
+      record.naturalHeight = dims.height;
     }
   }
   return { artifactId, record, entry, absPath, projectRelPath };
+}
+
+function cachedImageDims(
+  type: "png" | "jpg" | "webp",
+  absPath: string,
+  stat: fs.Stats,
+): { width: number; height: number } | null {
+  const key = `${path.resolve(absPath)}\0${stat.mtimeMs}\0${stat.size}`;
+  if (imageDimsCache.has(key)) return imageDimsCache.get(key)!;
+  let dims: { width: number; height: number } | null = null;
+  try {
+    dims = readImageDims(type, readFilePrefix(absPath, stat.size)) ?? null;
+  } catch {
+    // ignore malformed image headers in listings
+  }
+  imageDimsCache.set(key, dims);
+  if (imageDimsCache.size > 10_000) {
+    const first = imageDimsCache.keys().next().value;
+    if (first) imageDimsCache.delete(first);
+  }
+  return dims;
 }
 
 function readFilePrefix(absPath: string, size: number): Buffer {
