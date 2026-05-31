@@ -462,8 +462,7 @@ html, body, #root {
   border-color: var(--border-strong);
 }
 
-/* Fullscreen overlay: pinned to the viewport, not affected by zoom-pan
-   and not animated (it's a modal, not a layout reflow). */
+/* Fullscreen overlay: pinned to the viewport, not affected by zoom-pan. */
 .tile.tile-expanded {
   position: fixed;
   inset: 0;
@@ -476,6 +475,46 @@ html, body, #root {
   transform: none;
   transition: none;
 }
+.tile.tile-expanded.tile-expanding {
+  transform-origin: top left;
+  will-change: transform, border-radius, opacity;
+  animation: tile-expand-from-canvas 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.tile.tile-expanded.tile-collapsing {
+  pointer-events: none;
+  transform-origin: top left;
+  will-change: transform, border-radius, opacity;
+  animation: tile-collapse-to-canvas 260ms cubic-bezier(0.7, 0, 0.84, 0) both;
+}
+
+@keyframes tile-expand-from-canvas {
+  from {
+    transform:
+      translate3d(var(--expand-from-x, 0), var(--expand-from-y, 0), 0)
+      scale(var(--expand-from-scale-x, 1), var(--expand-from-scale-y, 1));
+    border-radius: 6px;
+    opacity: 0.96;
+  }
+  to {
+    transform: translate3d(0, 0, 0) scale(1, 1);
+    border-radius: 0;
+    opacity: 1;
+  }
+}
+@keyframes tile-collapse-to-canvas {
+  from {
+    transform: translate3d(0, 0, 0) scale(1, 1);
+    border-radius: 0;
+    opacity: 1;
+  }
+  to {
+    transform:
+      translate3d(var(--expand-from-x, 0), var(--expand-from-y, 0), 0)
+      scale(var(--expand-from-scale-x, 1), var(--expand-from-scale-y, 1));
+    border-radius: 6px;
+    opacity: 0.96;
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .tile,
@@ -484,6 +523,8 @@ html, body, #root {
   .icon-btn,
   .image-zoom-toolbar button,
   .toolbar button { transition: none; }
+  .tile.tile-expanded.tile-expanding,
+  .tile.tile-expanded.tile-collapsing { animation: none; }
 }
 
 /* Icon button: sized to meet Apple HIG's 44×44 minimum touch target so

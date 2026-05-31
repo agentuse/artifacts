@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   TransformWrapper,
   TransformComponent,
@@ -27,6 +27,8 @@ const MAX_SCALE = 4;
 const FIT_PADDING = 24;
 const INITIAL_VISIBLE_TILE_LIMIT = 32;
 const TOUCH_INITIAL_VISIBLE_TILE_LIMIT = 6;
+const TOUCH_MAX_VISIBLE_TILES = 48;
+const TOUCH_LIGHTWEIGHT_PREVIEW_SCALE = 0.32;
 const VIRTUAL_OVERSCAN_SCREEN_PX = 600;
 const TOUCH_VIRTUAL_OVERSCAN_SCREEN_PX = 160;
 const VISIBLE_RECT_EPSILON = 240;
@@ -92,12 +94,21 @@ type CanvasRect = {
   bottom: number;
 };
 
+type TileExpandOrigin = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
 type WheelPanTarget = {
   x: number;
   y: number;
   lastAt: number;
   frame: number | null;
 };
+
+type KeyboardDirection = "left" | "right" | "up" | "down";
 
 const CANVAS_PAN_EXCLUDED_SELECTOR = [
   "button",
@@ -115,6 +126,18 @@ const CANVAS_PAN_EXCLUDED_SELECTOR = [
   ".action-menu-panel",
 ].join(",");
 
+const CANVAS_KEYBOARD_EXCLUDED_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "textarea",
+  "select",
+  "[contenteditable='true']",
+  ".drawer",
+  ".settings-layer",
+  ".action-menu-panel",
+].join(",");
+
 function tileIntersectsRect(tile: LaidOut, rect: CanvasRect): boolean {
   return (
     tile.x < rect.right &&
@@ -127,6 +150,12 @@ function tileIntersectsRect(tile: LaidOut, rect: CanvasRect): boolean {
 function canPanCanvas(wrap: HTMLElement, target: EventTarget | null): boolean {
   if (!(target instanceof Element) || !wrap.contains(target)) return false;
   return !target.closest(CANVAS_PAN_EXCLUDED_SELECTOR);
+}
+
+function canUseCanvasKeyboard(target: EventTarget | null): boolean {
+  if (document.querySelector(".settings-layer")) return false;
+  if (!(target instanceof Element)) return true;
+  return !target.closest(CANVAS_KEYBOARD_EXCLUDED_SELECTOR);
 }
 
 function visibleRectFromTransform(
@@ -171,6 +200,83 @@ function previewScaleBucket(scale: number): number {
   if (scale < 2.5) return 2;
   if (scale < 3.5) return 3;
   return 4;
+}
+
+function tileCenterX(tile: LaidOut): number {
+  return tile.x + tile.w / 2;
+}
+
+function rowGroups(tiles: LaidOut[]): LaidOut[][] {
+  const rows: LaidOut[][] = [];
+  const sorted = [...tiles].sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const tile of sorted) {
+    const row = rows.find((candidate) => Math.abs(candidate[0]!.y - tile.y) < 1);
+    if (row) row.push(tile);
+    else rows.push([tile]);
+  }
+  for (const row of rows) row.sort((a, b) => a.x - b.x);
+  return rows;
+}
+
+function firstKeyboardTile(
+  tiles: LaidOut[],
+  visibleRect: CanvasRect | null,
+): LaidOut | undefined {
+  const candidates = visibleRect
+    ? tiles.filter((tile) => tileIntersectsRect(tile, visibleRect))
+    : tiles;
+  return [...(candidates.length ? candidates : tiles)]
+    .sort((a, b) => a.y - b.y || a.x - b.x)[0];
+}
+
+function limitTilesNearViewport(
+  tiles: LaidOut[],
+  rect: CanvasRect | null,
+  limit: number,
+): LaidOut[] {
+  if (tiles.length <= limit) return tiles;
+  if (!rect) return tiles.slice(0, limit);
+  const centerX = (rect.left + rect.right) / 2;
+  const centerY = (rect.top + rect.bottom) / 2;
+  return [...tiles]
+    .sort((a, b) => {
+      const ax = a.x + a.w / 2 - centerX;
+      const ay = a.y + a.h / 2 - centerY;
+      const bx = b.x + b.w / 2 - centerX;
+      const by = b.y + b.h / 2 - centerY;
+      return ax * ax + ay * ay - (bx * bx + by * by);
+    })
+    .slice(0, limit)
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+function nextKeyboardTile(
+  tiles: LaidOut[],
+  currentId: string | null,
+  direction: KeyboardDirection,
+  visibleRect: CanvasRect | null,
+): LaidOut | undefined {
+  if (tiles.length === 0) return undefined;
+  if (!currentId) return firstKeyboardTile(tiles, visibleRect);
+
+  const rows = rowGroups(tiles);
+  const rowIndex = rows.findIndex((row) => row.some((tile) => tile.id === currentId));
+  if (rowIndex === -1) return firstKeyboardTile(tiles, visibleRect);
+  const row = rows[rowIndex]!;
+  const columnIndex = row.findIndex((tile) => tile.id === currentId);
+  if (columnIndex === -1) return firstKeyboardTile(tiles, visibleRect);
+
+  if (direction === "left") return row[Math.max(0, columnIndex - 1)];
+  if (direction === "right") return row[Math.min(row.length - 1, columnIndex + 1)];
+
+  const targetRow = rows[rowIndex + (direction === "up" ? -1 : 1)];
+  if (!targetRow) return row[columnIndex];
+  const current = row[columnIndex]!;
+  const currentX = tileCenterX(current);
+  return [...targetRow].sort((a, b) => {
+    const byDistance = Math.abs(tileCenterX(a) - currentX) - Math.abs(tileCenterX(b) - currentX);
+    return byDistance || a.x - b.x;
+  })[0];
 }
 
 /** sizeOverrides is keyed by `${projectId}/${name}` (NOT artifactId) so a
@@ -285,6 +391,7 @@ const FLOATING_HEAD_GAP = 8;
 const FLOATING_HEAD_MIN_W = 520;
 const FLOATING_HEAD_MIN_TOP = 8;
 const FLOATING_HEAD_MARGIN = 8;
+const FULLSCREEN_TRANSITION_MS = 260;
 
 export function Canvas(props: {
   artifacts: Array<[string, ArtifactRecord]>;
@@ -300,6 +407,8 @@ export function Canvas(props: {
   // floating head (positioned in screen space, see below) so the controls
   // stay readable at any zoom. Click outside or Esc to exit.
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [expandOrigin, setExpandOrigin] = useState<TileExpandOrigin | null>(null);
+  const [expandedClosing, setExpandedClosing] = useState(false);
   // Per-tile size overrides set by the focused-tile resize handle. Keyed by
   // `${projectId}/${name}` so the size sticks as the artifact file changes.
   // Hydrated from localStorage on mount; we persist once per
@@ -389,6 +498,7 @@ export function Canvas(props: {
   const visibleTimerRef = useRef<number | null>(null);
   const wheelIdleTimerRef = useRef<number | null>(null);
   const movingTimerRef = useRef<number | null>(null);
+  const closeExpandedTimerRef = useRef<number | null>(null);
   const wheelPanTargetRef = useRef<WheelPanTarget | null>(null);
   const lastGridScaleRef = useRef<number | null>(null);
   const [visibleRect, setVisibleRect] = useState<CanvasRect | null>(null);
@@ -466,6 +576,9 @@ export function Canvas(props: {
       }
       if (movingTimerRef.current != null) {
         window.clearTimeout(movingTimerRef.current);
+      }
+      if (closeExpandedTimerRef.current != null) {
+        window.clearTimeout(closeExpandedTimerRef.current);
       }
     };
   }, []);
@@ -599,6 +712,110 @@ export function Canvas(props: {
     return paneInsetForViewport(wrap.clientWidth);
   };
 
+  const ensureTileVisible = (tile: LaidOut, duration = 180) => {
+    const r = transformRef.current;
+    const wrap = wrapRef.current;
+    if (!r || !wrap) return;
+    const state = transformStateRef.current;
+    const scale = Math.max(0.01, state.scale);
+    const viewportLeft = measuredPaneInset(wrap) + FIT_PADDING;
+    const viewportTop = FIT_PADDING;
+    const viewportRight = wrap.clientWidth - FIT_PADDING;
+    const viewportBottom = wrap.clientHeight - FIT_PADDING;
+    const viewportW = Math.max(1, viewportRight - viewportLeft);
+    const viewportH = Math.max(1, viewportBottom - viewportTop);
+    const screenW = tile.w * scale;
+    const screenH = tile.h * scale;
+    const screenLeft = state.positionX + tile.x * scale;
+    const screenTop = state.positionY + tile.y * scale;
+    const screenRight = screenLeft + screenW;
+    const screenBottom = screenTop + screenH;
+    let nextX = state.positionX;
+    let nextY = state.positionY;
+
+    if (screenW > viewportW) {
+      nextX = viewportLeft + (viewportW - screenW) / 2 - tile.x * scale;
+    } else if (screenLeft < viewportLeft) {
+      nextX += viewportLeft - screenLeft;
+    } else if (screenRight > viewportRight) {
+      nextX -= screenRight - viewportRight;
+    }
+
+    if (screenH > viewportH) {
+      nextY = viewportTop + (viewportH - screenH) / 2 - tile.y * scale;
+    } else if (screenTop < viewportTop) {
+      nextY += viewportTop - screenTop;
+    } else if (screenBottom > viewportBottom) {
+      nextY -= screenBottom - viewportBottom;
+    }
+
+    if (Math.abs(nextX - state.positionX) < 0.5 && Math.abs(nextY - state.positionY) < 0.5) {
+      return;
+    }
+    markCanvasMoving(duration + 80);
+    r.setTransform(
+      nextX,
+      nextY,
+      scale,
+      prefersReducedMotion ? 0 : duration,
+      "easeOut",
+    );
+  };
+
+  const captureTileScreenRect = (id: string, tile?: LaidOut): TileExpandOrigin | null => {
+    const wrap = wrapRef.current;
+    const el = wrap?.querySelector<HTMLElement>(
+      `[data-tile-id="${CSS.escape(id)}"]`,
+    );
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
+    }
+    if (!tile) return null;
+    const state = transformStateRef.current;
+    const scale = Math.max(0.01, state.scale);
+    return {
+      x: state.positionX + tile.x * scale,
+      y: state.positionY + tile.y * scale,
+      w: tile.w * scale,
+      h: tile.h * scale,
+    };
+  };
+
+  const expandTile = (id: string, tile?: LaidOut) => {
+    if (closeExpandedTimerRef.current != null) {
+      window.clearTimeout(closeExpandedTimerRef.current);
+      closeExpandedTimerRef.current = null;
+    }
+    setExpandedClosing(false);
+    setExpandOrigin(captureTileScreenRect(id, tile));
+    onExpandedChange(id);
+  };
+
+  const closeExpandedTile = (restoreFocus = true) => {
+    if (!expandedId) return;
+    const closingId = expandedId;
+    if (closeExpandedTimerRef.current != null) {
+      window.clearTimeout(closeExpandedTimerRef.current);
+      closeExpandedTimerRef.current = null;
+    }
+    if (prefersReducedMotion || !expandOrigin) {
+      onExpandedChange(null);
+      if (restoreFocus) setFocusedId(closingId);
+      setExpandOrigin(null);
+      setExpandedClosing(false);
+      return;
+    }
+    setExpandedClosing(true);
+    closeExpandedTimerRef.current = window.setTimeout(() => {
+      closeExpandedTimerRef.current = null;
+      onExpandedChange(null);
+      if (restoreFocus) setFocusedId(closingId);
+      setExpandOrigin(null);
+      setExpandedClosing(false);
+    }, FULLSCREEN_TRANSITION_MS);
+  };
+
   const computeFitTransform = (
     viewportW: number,
     viewportH: number,
@@ -708,13 +925,15 @@ export function Canvas(props: {
   }, [canvasW, canvasH, touchCanvas, wrapWidth]);
 
   // Cmd/Ctrl + (= or +) / - / 0 → zoom in / out / fit. Provides a reliable
-  // zoom path on iPad where trackpad pinch is eaten by the OS.
+  // zoom path on iPad where trackpad pinch is eaten by the OS. Plain arrow
+  // keys move focus across the laid-out board; Space toggles fullscreen for
+  // the focused artifact.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         // Esc walks the modal stack outside-in: fullscreen first, then focus.
         if (expandedId) {
-          onExpandedChange(null);
+          closeExpandedTile();
           return;
         }
         if (focusedId) {
@@ -722,6 +941,46 @@ export function Canvas(props: {
           return;
         }
       }
+      if (!canUseCanvasKeyboard(e.target)) return;
+
+      const direction =
+        e.key === "ArrowLeft"
+          ? "left"
+          : e.key === "ArrowRight"
+            ? "right"
+            : e.key === "ArrowUp"
+              ? "up"
+              : e.key === "ArrowDown"
+                ? "down"
+                : null;
+      if (direction) {
+        e.preventDefault();
+        const next = nextKeyboardTile(
+          tiles,
+          focusedId ?? expandedId,
+          direction,
+          visibleRectRef.current,
+        );
+        if (next) {
+          if (expandedId) onExpandedChange(null);
+          setFocusedId(next.id);
+          ensureTileVisible(next);
+        }
+        return;
+      }
+
+      if (e.key === " " || e.code === "Space") {
+        const id = expandedId ?? focusedId;
+        if (!id) return;
+        e.preventDefault();
+        if (expandedId) {
+          closeExpandedTile();
+        } else {
+          expandTile(id, tiles.find((tile) => tile.id === id));
+        }
+        return;
+      }
+
       if (!(e.metaKey || e.ctrlKey)) return;
       const r = transformRef.current;
       if (!r) return;
@@ -739,7 +998,7 @@ export function Canvas(props: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedId, onExpandedChange, focusedId]);
+  }, [expandedId, onExpandedChange, focusedId, tiles, prefersReducedMotion]);
 
   // Outside-click defocus. Capture phase so we hear the pointerdown before
   // it bubbles up (and before react-zoom-pan-pinch's window mousedown). The
@@ -765,6 +1024,13 @@ export function Canvas(props: {
   useEffect(() => {
     if (expandedId && focusedId) setFocusedId(null);
   }, [expandedId, focusedId]);
+
+  useEffect(() => {
+    if (!expandedId) {
+      setExpandOrigin(null);
+      setExpandedClosing(false);
+    }
+  }, [expandedId]);
 
   const expandedRec = expandedId
     ? artifacts.find(([id]) => id === expandedId)?.[1]
@@ -842,13 +1108,18 @@ export function Canvas(props: {
   // layout that drives its rect changes). The transform itself is already
   // current in the ref — just apply it to the new rect.
   const focusedTile = focusedId ? tiles.find((t) => t.id === focusedId) : null;
+  const useLightweightPreviews =
+    touchCanvas && previewScale <= TOUCH_LIGHTWEIGHT_PREVIEW_SCALE;
   const visibleTiles = useMemo(() => {
     const initialLimit = touchCanvas
       ? TOUCH_INITIAL_VISIBLE_TILE_LIMIT
       : INITIAL_VISIBLE_TILE_LIMIT;
-    const base = visibleRect
+    let base = visibleRect
       ? tiles.filter((tile) => tileIntersectsRect(tile, visibleRect))
       : tiles.slice(0, initialLimit);
+    if (touchCanvas) {
+      base = limitTilesNearViewport(base, visibleRect, TOUCH_MAX_VISIBLE_TILES);
+    }
     if (focusedTile && !base.some((tile) => tile.id === focusedTile.id)) {
       return [...base, focusedTile];
     }
@@ -1004,9 +1275,10 @@ export function Canvas(props: {
                     w={w}
                     h={h}
                     previewScale={previewScale}
+                    lightweightPreview={useLightweightPreviews}
                     focused={focusedId === id}
                     onFocus={() => setFocusedId(id)}
-                    onExpand={() => onExpandedChange(id)}
+                    onExpand={() => expandTile(id, { id, rec, x, y, w, h })}
                     onResizeStart={(e) =>
                       handleResizeStart(sizeKey(rec), w, h, e)
                     }
@@ -1028,7 +1300,7 @@ export function Canvas(props: {
           <TileActions artifactId={focusedId} record={focusedRec} />
           <button
             className="icon-btn"
-            onClick={() => onExpandedChange(focusedId)}
+            onClick={() => expandTile(focusedId)}
             aria-label="fullscreen"
             title="fullscreen"
           >
@@ -1050,7 +1322,9 @@ export function Canvas(props: {
           artifactId={expandedId}
           record={expandedRec}
           expanded
-          onClose={() => onExpandedChange(null)}
+          expandOrigin={expandOrigin}
+          closing={expandedClosing}
+          onClose={() => closeExpandedTile()}
         />
       )}
     </div>
@@ -1068,6 +1342,7 @@ type TileWrapperProps = {
       w: number;
       h: number;
       previewScale: number;
+      lightweightPreview: boolean;
       onExpand: () => void;
       focused?: boolean;
       onFocus?: () => void;
@@ -1076,6 +1351,8 @@ type TileWrapperProps = {
     }
   | {
       expanded: true;
+      expandOrigin?: TileExpandOrigin | null;
+      closing?: boolean;
       onClose: () => void;
       onExpand?: never;
       focused?: never;
@@ -1086,6 +1363,7 @@ type TileWrapperProps = {
       w?: never;
       h?: never;
       previewScale?: never;
+      lightweightPreview?: never;
     }
 );
 
@@ -1096,8 +1374,15 @@ function TileWrapper(props: TileWrapperProps) {
   // each frame; transforms stay on the compositor. Width and height are
   // intentionally NOT transitioned — during a resize drag we want the
   // focused tile to track the cursor 1:1, not lag behind a tween.
-  const tileStyle = props.expanded
-    ? undefined
+  const tileStyle: CSSProperties | undefined = props.expanded
+    ? props.expandOrigin
+      ? ({
+          "--expand-from-x": `${props.expandOrigin.x}px`,
+          "--expand-from-y": `${props.expandOrigin.y}px`,
+          "--expand-from-scale-x": `${props.expandOrigin.w / window.innerWidth}`,
+          "--expand-from-scale-y": `${props.expandOrigin.h / window.innerHeight}`,
+        } as CSSProperties)
+      : undefined
     : {
         transform: `translate3d(${props.x}px, ${props.y}px, 0)`,
         width: props.w,
@@ -1124,6 +1409,8 @@ function TileWrapper(props: TileWrapperProps) {
       className={
         "tile" +
         (props.expanded ? " tile-expanded" : "") +
+        (props.expanded && props.expandOrigin && !props.closing ? " tile-expanding" : "") +
+        (props.expanded && props.expandOrigin && props.closing ? " tile-collapsing" : "") +
         (props.focused ? " tile-focused" : "") +
         (isPreview ? " tile-preview" : "")
       }
@@ -1169,6 +1456,7 @@ function TileWrapper(props: TileWrapperProps) {
           record={props.record}
           previewWidth={previewWidth}
           preview={isPreview}
+          lightweightPreview={props.lightweightPreview}
           zoomable={props.expanded}
         />
       </div>

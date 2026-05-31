@@ -136,6 +136,7 @@ export function Tile(props: {
   record: ArtifactRecord;
   previewWidth?: number;
   preview?: boolean;
+  lightweightPreview?: boolean;
   zoomable?: boolean;
 }) {
   const url = artifactUrl(props.artifactId, props.record);
@@ -143,6 +144,10 @@ export function Tile(props: {
     props.record.type === "png" ||
     props.record.type === "jpg" ||
     props.record.type === "webp";
+
+  if (props.preview && props.lightweightPreview) {
+    return <PreviewBody record={props.record} />;
+  }
 
   if (props.preview && props.record.type === "html") {
     const baseSrc = props.record.local ? url : `/api/render/${props.artifactId}`;
