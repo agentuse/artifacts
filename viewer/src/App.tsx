@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Menu, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Menu, Settings, X } from "lucide-react";
 import { fetchManifestRaw } from "./api";
 import type { ArtifactRecord, Manifest } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { ArtifactList, artifactMatchesGroup, latestGroupFor } from "./components/ArtifactList";
 import { Canvas } from "./components/Canvas";
+import { SettingsSheet } from "./components/SettingsSheet";
 import { loadSort, saveSort, type SortMode } from "./sort";
 
 interface Route {
@@ -59,10 +60,32 @@ export function App() {
   const manifestRawRef = useRef<string | null>(null);
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.href));
   const [sort, setSortState] = useState<SortMode>(() => loadSort());
+  const isMobileNav = useMediaQuery("(max-width: 900px)");
+  const [mobileNavPane, setMobileNavPane] = useState<"projects" | "artifacts">("projects");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [flashedProjectId, setFlashedProjectId] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const setSort = (next: SortMode) => {
     setSortState(next);
     saveSort(next);
   };
+
+  const notify = useCallback((type: "success" | "error", text: string) => {
+    setNotification({ type, text });
+  }, []);
+
+  const flashProject = useCallback((projectId: string) => {
+    setFlashedProjectId(projectId);
+  }, []);
+
+  const refreshManifest = useCallback(async () => {
+    const raw = await fetchManifestRaw();
+    manifestRawRef.current = raw;
+    setManifest(JSON.parse(raw) as Manifest);
+  }, []);
 
   // Initial fetch + 2s polling per spec.
   useEffect(() => {
@@ -83,13 +106,25 @@ export function App() {
       alive = false;
       clearInterval(id);
     };
-  }, []);
+  }, [refreshManifest]);
 
   useEffect(() => {
     const onPop = () => setRoute(parseRoute(window.location.href));
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  useEffect(() => {
+    if (!notification) return;
+    const id = window.setTimeout(() => setNotification(null), 3600);
+    return () => window.clearTimeout(id);
+  }, [notification]);
+
+  useEffect(() => {
+    if (!flashedProjectId) return;
+    const id = window.setTimeout(() => setFlashedProjectId(null), 2400);
+    return () => window.clearTimeout(id);
+  }, [flashedProjectId]);
 
   // Default selection on first manifest load: pick a project and land on
   // its most-recently-updated folder so the user sees fresh work without an
@@ -141,6 +176,7 @@ export function App() {
     };
     setRoute(next);
     navRoute(next);
+    if (isMobileNav) setMobileNavPane("artifacts");
   };
 
   const onSelectArtifact = (artifactName: string | undefined) => {
@@ -183,14 +219,24 @@ export function App() {
     };
     setRoute(next);
     navRoute(next, true);
+    if (open && isMobileNav) setMobileNavPane("projects");
   };
 
   if (!manifest) {
     return <div className="empty">Loading…</div>;
   }
 
+  const selectedProjectName = route.projectId ? manifest.projects[route.projectId]?.name : undefined;
+
   return (
-    <div className={"app" + (drawerOpen ? " drawer-open" : "") + (panesHidden ? " panes-hidden" : "")}>
+    <div
+      className={
+        "app" +
+        (drawerOpen ? " drawer-open" : "") +
+        (panesHidden ? " panes-hidden" : "") +
+        (mobileNavPane === "artifacts" ? " mobile-nav-artifacts" : " mobile-nav-projects")
+      }
+    >
       <button
         className="menu-btn"
         onClick={() => setDrawerOpen(panesHidden)}
@@ -217,11 +263,21 @@ export function App() {
               Updated
             </button>
           </div>
+          <button
+            className="settings-btn"
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="open settings"
+            title="settings"
+          >
+            <Settings size={16} strokeWidth={1.75} />
+          </button>
         </div>
         <Sidebar
           projects={manifest.projects}
           selected={route.projectId}
           sort={sort}
+          flashedProjectId={flashedProjectId}
           onSelect={onSelectProject}
         />
         <ArtifactList
@@ -230,6 +286,8 @@ export function App() {
           selected={route.artifactName}
           selectedGroup={route.group}
           sort={sort}
+          mobileBackLabel={selectedProjectName}
+          onMobileBack={() => setMobileNavPane("projects")}
           onSelect={onSelectArtifact}
           onSelectGroup={onSelectGroup}
         />
@@ -241,6 +299,36 @@ export function App() {
         panesHidden={panesHidden}
         onExpandedChange={onExpandedChange}
       />
+      <SettingsSheet
+        open={settingsOpen}
+        manifest={manifest}
+        flashedProjectId={flashedProjectId}
+        onClose={() => setSettingsOpen(false)}
+        onChanged={refreshManifest}
+        onNotify={notify}
+        onProjectAdded={flashProject}
+      />
+      {notification && (
+        <div className={`app-notice ${notification.type}`} role="status">
+          {notification.text}
+        </div>
+      )}
     </div>
   );
+}
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia(query).matches,
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const onChange = () => setMatches(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [query]);
+
+  return matches;
 }

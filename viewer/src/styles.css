@@ -104,6 +104,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   padding: 12px 16px 12px 56px;
   min-height: 56px;
   border-bottom: 1px solid var(--border);
@@ -111,6 +112,27 @@ html, body, #root {
 }
 .drawer-head .sort-toggle {
   padding: 0;
+}
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.settings-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.settings-btn:active {
+  background: var(--accent-soft);
 }
 .app.panes-hidden .drawer {
   pointer-events: none;
@@ -229,6 +251,19 @@ html, body, #root {
   padding-left: 14px;
   color: var(--fg);
 }
+.project-flash {
+  animation: project-row-flash 1800ms ease-out;
+}
+@keyframes project-row-flash {
+  0% {
+    background: rgba(5, 223, 114, 0.22);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
 .list-item .secondary {
   color: var(--muted);
   font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -265,6 +300,10 @@ html, body, #root {
   background: var(--pane-bg);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
+}
+
+.mobile-artifact-back {
+  display: none;
 }
 .group-head:hover {
   background: var(--pane-bg-elev);
@@ -672,6 +711,9 @@ html, body, #root {
   height: 100%;
   border: 0;
   display: block;
+}
+.tile-body.html iframe {
+  background: #fff;
 }
 .tile-body.lod-preview {
   padding: 34px 36px;
@@ -1125,6 +1167,208 @@ html, body, #root {
   transform: scale(0.96);
 }
 
+.app-notice {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 50%;
+  z-index: 420;
+  max-width: min(520px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--tile-bg);
+  color: var(--fg);
+  box-shadow: var(--shadow-float);
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+.app-notice.error {
+  border-color: #ef4444;
+}
+
+/* ----- Settings sheet ----- */
+
+.settings-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  justify-content: flex-end;
+}
+.settings-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+.settings-sheet {
+  position: relative;
+  z-index: 1;
+  width: min(560px, 100vw);
+  height: 100%;
+  overflow: auto;
+  background: var(--pane-bg);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-drawer);
+}
+.settings-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--pane-bg);
+}
+.settings-head h2,
+.settings-section h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+.settings-head p,
+.settings-section p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.settings-alert {
+  margin: 16px 24px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-size: 13px;
+}
+.settings-alert.error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.10);
+}
+.settings-section {
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.settings-textarea,
+.settings-add-project input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--tile-bg);
+  color: var(--fg);
+  font: inherit;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+}
+.settings-textarea {
+  min-height: 220px;
+  padding: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.settings-add-project {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.settings-add-project input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+}
+.settings-actions,
+.settings-add-project button,
+.settings-small-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.settings-actions button,
+.settings-add-project button,
+.settings-small-btn {
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--tile-bg);
+  color: var(--fg);
+  padding: 0 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.settings-actions button:hover,
+.settings-add-project button:hover,
+.settings-small-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.settings-actions button:disabled,
+.settings-add-project button:disabled,
+.settings-small-btn:disabled,
+.settings-icon-danger:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.settings-project-list {
+  border-top: 1px solid var(--border);
+}
+.settings-project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-project-name {
+  font-size: 14px;
+}
+.settings-project-path,
+.settings-project-meta {
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.settings-project-meta {
+  margin-top: 3px;
+}
+.settings-icon-danger {
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.settings-icon-danger:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
 /* ---- Touch / narrow viewports (iPad portrait, split view, phones) ---- */
 @media (max-width: 900px), (pointer: coarse) {
   .react-transform-wrapper,
@@ -1188,17 +1432,39 @@ html, body, #root {
     opacity: 0;
   }
   .drawer .pane {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  .drawer .pane:first-child {
-    flex: 0 0 auto;
-    max-height: 40vh;
-  }
-  .drawer .pane:last-child {
     flex: 1 1 auto;
-    border-bottom: none;
     min-height: 0;
+    border-right: none;
+    border-bottom: none;
+  }
+  .app.mobile-nav-projects .artifacts-pane,
+  .app.mobile-nav-artifacts .projects-pane {
+    display: none;
+  }
+  .mobile-artifact-back {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    padding: 12px 16px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--pane-bg);
+    color: var(--fg);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .mobile-artifact-back span:first-child {
+    color: var(--accent);
+    font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .mobile-artifact-back:hover {
+    background: var(--pane-bg-elev);
   }
   .app.drawer-open:not(.panes-hidden) .backdrop {
     display: block;
@@ -1209,4 +1475,25 @@ html, body, #root {
   }
   /* Avoid colliding with the menu button. */
   .toolbar { top: 10px; right: 10px; }
+  .settings-layer {
+    display: block;
+  }
+  .settings-sheet {
+    width: 100vw;
+    border-left: 0;
+  }
+  .settings-head,
+  .settings-section {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .settings-section-head,
+  .settings-add-project {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-small-btn,
+  .settings-add-project button {
+    justify-content: center;
+  }
 }

@@ -167,10 +167,22 @@ export function ArtifactList(props: {
   selected?: string;
   selectedGroup?: string;
   sort: SortMode;
+  mobileBackLabel?: string;
+  onMobileBack?: () => void;
   onSelect: (name: string | undefined) => void;
   onSelectGroup: (group: string | undefined) => void;
 }) {
-  const { manifest, projectId, selected, selectedGroup, sort, onSelect, onSelectGroup } = props;
+  const {
+    manifest,
+    projectId,
+    selected,
+    selectedGroup,
+    sort,
+    mobileBackLabel,
+    onMobileBack,
+    onSelect,
+    onSelectGroup,
+  } = props;
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const latestMap = projectId ? manifest.latest[projectId] ?? {} : {};
   const artifacts = useMemo(
@@ -222,7 +234,8 @@ export function ArtifactList(props: {
 
   if (!projectId) {
     return (
-      <div className="pane">
+      <div className="pane artifacts-pane">
+        <MobileArtifactNavHead label={mobileBackLabel} onBack={onMobileBack} />
         <h2>Artifacts</h2>
         <div className="list-item secondary">pick a project</div>
       </div>
@@ -282,7 +295,8 @@ export function ArtifactList(props: {
   };
 
   return (
-    <div className="pane">
+    <div className="pane artifacts-pane">
+      <MobileArtifactNavHead label={mobileBackLabel} onBack={onMobileBack} />
       <h2>Artifacts</h2>
       <div
         className={`list-item${allSelected ? " selected" : ""}`}
@@ -348,5 +362,22 @@ export function ArtifactList(props: {
         </>
       )}
     </div>
+  );
+}
+
+function MobileArtifactNavHead(props: {
+  label?: string;
+  onBack?: () => void;
+}) {
+  return (
+    <button
+      className="mobile-artifact-back"
+      type="button"
+      onClick={props.onBack}
+      aria-label="show projects"
+    >
+      <span aria-hidden="true">‹</span>
+      <span>{props.label ?? "Projects"}</span>
+    </button>
   );
 }

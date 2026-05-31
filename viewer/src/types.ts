@@ -14,6 +14,12 @@ export interface ProjectRecord {
   updatedAt?: string;
 }
 
+export interface ProjectInfo {
+  projectId: string;
+  name: string;
+  path: string;
+}
+
 export interface ArtifactRecord {
   projectId: string;
   name: string;
@@ -47,4 +53,13 @@ export interface Manifest {
   projects: Record<string, ProjectRecord>;
   artifacts: Record<string, ArtifactRecord>;
   latest: Record<string, Record<string, string>>;
+}
+
+export interface ViewerSettings {
+  ignorePatterns: string[];
+}
+
+export interface SettingsResponse {
+  defaultIgnorePatterns: string[];
+  settings: ViewerSettings;
 }
