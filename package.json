@@ -1,6 +1,6 @@
 {
   "name": "@agentuse/artifacts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI + viewer for collecting artifacts emitted by AI agents",
   "type": "module",
   "license": "MIT",
@@ -29,6 +29,7 @@
     "artifacts": "dist/bin.js"
   },
   "files": [
+    "CHANGELOG.md",
     "dist",
     "viewer-dist"
   ],
