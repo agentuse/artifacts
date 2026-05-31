@@ -259,19 +259,16 @@ function ZoomableImage(props: { src: string }) {
         centerOnInit
         limitToBounds={false}
         smooth
-        wheel={{ step: 0.12 }}
+        wheel={{ step: 0.3, smoothStep: 0.006 }}
         doubleClick={{ mode: "toggle", step: 1.6, animationTime: 180 }}
         panning={{ velocityDisabled: false }}
         alignmentAnimation={{ disabled: true }}
       >
-        {({ zoomIn, zoomOut, resetTransform }) => (
+        {({ zoomIn, zoomOut }) => (
           <>
             <div className="image-zoom-toolbar" aria-label="image zoom controls">
               <button onClick={() => zoomOut()} aria-label="zoom out" title="zoom out">
                 <Minus size={16} strokeWidth={2} />
-              </button>
-              <button onClick={() => resetTransform(180)} title="fit">
-                fit
               </button>
               <button onClick={() => zoomIn()} aria-label="zoom in" title="zoom in">
                 <Plus size={16} strokeWidth={2} />
