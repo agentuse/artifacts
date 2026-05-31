@@ -95,13 +95,12 @@ function loadStoredSizes(): SizeMap {
   }
 }
 
-/** Fit the image's natural dimensions into a TILE_W bounding box (whichever
- *  side is larger pegs to TILE_W; the other shrinks proportionally), then
- *  floor at MIN_TILE_W/H so a tiny thumbnail still gets a usable tile. The
- *  body's `object-fit: contain` upscales the rendered image when the tile
- *  ends up larger than the natural pixels — same behavior we already had
- *  for an oversized 720×720 tile. Returns undefined when the record isn't
- *  an image or natural dims weren't probed (old artifact, malformed file). */
+/** Fit the image's natural dimensions into a TILE_W bounding box, then scale
+ *  the whole tile up if needed to preserve aspect ratio while satisfying the
+ *  minimum interactive size. Applying MIN_TILE_W/H independently would make
+ *  extreme portrait/landscape images sit inside a mismatched frame; scaling
+ *  the pair keeps the preview canvas shaped like the image. Returns undefined
+ *  when the record isn't an image or natural dims weren't probed. */
 function naturalDefault(
   rec: { type: string; naturalWidth?: number; naturalHeight?: number },
 ): { w: number; h: number } | undefined {
@@ -112,11 +111,14 @@ function naturalDefault(
   const nh = rec.naturalHeight;
   if (nw == null || nh == null || nw <= 0 || nh <= 0) return undefined;
   const aspect = nw / nh;
-  const w = aspect >= 1 ? TILE_W : TILE_W * aspect;
-  const h = aspect >= 1 ? TILE_W / aspect : TILE_W;
+  let w = aspect >= 1 ? TILE_W : TILE_W * aspect;
+  let h = aspect >= 1 ? TILE_W / aspect : TILE_W;
+  const minScale = Math.max(1, MIN_TILE_W / w, MIN_TILE_H / h);
+  w *= minScale;
+  h *= minScale;
   return {
-    w: Math.max(MIN_TILE_W, Math.round(w)),
-    h: Math.max(MIN_TILE_H, Math.round(h)),
+    w: Math.round(w),
+    h: Math.round(h),
   };
 }
 
@@ -319,13 +321,29 @@ export function Canvas(props: {
 
     const usableW = Math.max(1, openW - FIT_PADDING * 2);
     const usableH = Math.max(1, openH - FIT_PADDING * 2);
-    const ideal = Math.min(usableW / contentW, usableH / contentH);
-    // Don't zoom past 1x for small content (prevents huge upscaling on a
-    // single tile); clamp to the wrapper's own scale bounds otherwise.
-    const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min(1, ideal)));
+    const widthFit = usableW / contentW;
+    const heightFit = usableH / contentH;
+    let scale = Math.min(1, widthFit, heightFit);
+    if (scale < MIN_SCALE) {
+      // Very long folders, especially on phones, cannot meaningfully fit on
+      // both axes. Prefer a readable width-fit view and let the user pan down
+      // the column instead of shrinking/centering the whole folder into a tiny
+      // strip.
+      scale = widthFit >= MIN_SCALE ? Math.min(1, widthFit) : MIN_SCALE;
+    }
+    scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
+    const scaledW = contentW * scale;
+    const scaledH = contentH * scale;
     return {
-      x: paneInset + FIT_PADDING + (usableW - contentW * scale) / 2 - contentLeft * scale,
-      y: FIT_PADDING + (usableH - contentH * scale) / 2 - contentTop * scale,
+      x:
+        paneInset +
+        FIT_PADDING +
+        (scaledW <= usableW ? (usableW - scaledW) / 2 : 0) -
+        contentLeft * scale,
+      y:
+        FIT_PADDING +
+        (scaledH <= usableH ? (usableH - scaledH) / 2 : 0) -
+        contentTop * scale,
       scale,
     };
   };

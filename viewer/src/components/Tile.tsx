@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { fetchArtifact } from "../api";
+import { parseMarkdownFrontmatter, type FrontmatterField } from "../frontmatter";
 import type { ArtifactRecord } from "../types";
 
 function encodePath(entry: string): string {
@@ -151,9 +152,11 @@ function MarkdownTile(props: { artifactId: string; url: string }) {
 
   if (error) return <div className="tile-body">error: {error}</div>;
   if (content == null) return <div className="tile-body">loading…</div>;
+  const parsed = parseMarkdownFrontmatter(content);
   return (
     <div className="tile-body markdown-body">
       <div className="markdown">
+        <Frontmatter fields={parsed.fields} />
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[rehypeHighlight]}
@@ -173,9 +176,39 @@ function MarkdownTile(props: { artifactId: string; url: string }) {
               ),
           }}
         >
-          {content}
+          {parsed.body}
         </ReactMarkdown>
       </div>
     </div>
+  );
+}
+
+function Frontmatter(props: { fields: FrontmatterField[] }) {
+  if (props.fields.length === 0) return null;
+  return (
+    <section className="frontmatter" aria-label="frontmatter">
+      {props.fields.map((field) => (
+        <div className="frontmatter-row" key={field.key}>
+          <div className="frontmatter-key">{field.key}</div>
+          <div className="frontmatter-value">
+            {Array.isArray(field.value) ? (
+              field.value.length ? (
+                <div className="frontmatter-tags">
+                  {field.value.map((item) => (
+                    <span className="frontmatter-tag" key={item}>{item}</span>
+                  ))}
+                </div>
+              ) : (
+                <span className="frontmatter-empty">empty</span>
+              )
+            ) : field.value ? (
+              field.value
+            ) : (
+              <span className="frontmatter-empty">empty</span>
+            )}
+          </div>
+        </div>
+      ))}
+    </section>
   );
 }
