@@ -5,6 +5,7 @@ import {
 } from "react-zoom-pan-pinch";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import rehypeHighlight from "rehype-highlight";
 import { Minus, Plus } from "lucide-react";
 import { fetchArtifact } from "../api";
@@ -374,7 +375,7 @@ function MarkdownTile(props: { artifactId: string; url: string }) {
       <div className="markdown">
         <Frontmatter fields={parsed.fields} />
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={[remarkGfm, remarkBreaks]}
           rehypePlugins={[rehypeHighlight]}
           components={{
             img: ({ src, ...imgProps }) => (
