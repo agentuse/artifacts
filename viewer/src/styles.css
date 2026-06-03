@@ -475,6 +475,18 @@ html, body, #root {
   transform: none;
   transition: none;
 }
+/* The canvas-wrap sets user-select: none so click-dragging to pan the board
+   never starts a text selection. That cascades into every tile. In the
+   fullscreen overlay there is no pan (it's a fixed, non-transformed sibling
+   outside TransformWrapper), so restore normal text selection for its content
+   — otherwise you can't highlight/copy text from an expanded markdown
+   artifact. */
+.tile.tile-expanded .tile-body,
+.tile.tile-expanded .tile-head .name {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .tile.tile-expanded.tile-expanding {
   transform-origin: top left;
   will-change: transform, border-radius, opacity;
