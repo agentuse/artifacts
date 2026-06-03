@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { Command } from "commander";
 import { CliError, ErrorEnvelope, envelope, exitCodeFor } from "./errors.js";
 import { viewerArtifactUrl, viewerProjectUrl } from "./artifacts.js";
@@ -53,6 +55,50 @@ function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function realpathOrResolve(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/**
+ * Turn a `url` target into a `{ projectId, name }` pair. The viewer's `/a/:name`
+ * route matches on the artifact's `name`, which is NOT always the file's
+ * project-relative path: legacy `.agentuse/artifacts/<group>/index.*` files are
+ * named `<group>`, siblings are `<group>/<file>`, while discovered project files
+ * are named by their project-relative path. To avoid duplicating that logic, we
+ * scan the project and match the target file's realpath against each artifact's
+ * absolute path, then use the scanned `name` as the source of truth.
+ *
+ * Fallbacks: an existing file that isn't a discovered artifact uses its
+ * project-relative path; a target that isn't a file on disk is treated as a
+ * literal artifact name in the cwd's project.
+ */
+function resolveArtifactName(target: string): { projectId: string; name: string } {
+  const abs = path.resolve(target);
+  let isFile = false;
+  try {
+    isFile = fs.statSync(abs).isFile();
+  } catch {
+    isFile = false;
+  }
+  if (isFile) {
+    const real = realpathOrResolve(abs);
+    const { project, artifacts } = listLocalArtifactsForCurrentProject(path.dirname(real));
+    const match = artifacts.find((a) => realpathOrResolve(a.absPath) === real);
+    if (match) return { projectId: project.projectId, name: match.record.name };
+    // File exists but isn't a discovered artifact (unsupported type, ignored
+    // path, or discovery disabled): best-effort project-relative path.
+    const name = path.relative(project.path, real).split(path.sep).join("/");
+    return { projectId: project.projectId, name };
+  }
+  // Not a file on disk: treat as a literal artifact name in the cwd's project.
+  const project = resolveProject();
+  return { projectId: project.projectId, name: target };
 }
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -142,17 +188,33 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .command("url")
-    .description("Print viewer URL: project home by default, an artifact when name is given.")
-    .argument("[name]", "artifact name")
-    .action((name: string | undefined) => {
+    .description(
+      "Print viewer URL: project home by default, or a deep link to an artifact. " +
+        "The target may be a file path (resolved to its project-relative name) or a literal artifact name.",
+    )
+    .argument("[target]", "artifact file path or name")
+    .option("--full", "deep link that opens the artifact in fullscreen on load")
+    .action((target: string | undefined, opts: { full?: boolean }) => {
       const global = program.opts<GlobalOpts>();
       try {
         const port = isServerRunning()?.port ?? DEFAULT_PORT;
-        const project = resolveProject();
-        const url = name
-          ? viewerArtifactUrl({ port }, project.projectId, name)
-          : viewerProjectUrl({ port }, project.projectId);
-        emit(global.json, { url }, () => human(url));
+        if (!target) {
+          const project = resolveProject();
+          const url = viewerProjectUrl({ port }, project.projectId);
+          emit(global.json, { url }, () => human(url));
+          return;
+        }
+        // A skill knows the path it wrote, not the artifact's internal name.
+        // If the target points at a real file, resolve the project from that
+        // file's location and use its project-relative path as the stable
+        // artifact name. Otherwise treat the target as a literal name.
+        const resolved = resolveArtifactName(target);
+        const url = viewerArtifactUrl({ port }, resolved.projectId, resolved.name, {
+          full: !!opts.full,
+        });
+        emit(global.json, { url, projectId: resolved.projectId, name: resolved.name }, () =>
+          human(url),
+        );
       } catch (e) {
         fail(global.json, e);
       }

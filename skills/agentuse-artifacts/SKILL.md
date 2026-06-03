@@ -99,6 +99,14 @@ Most commands accept `--json`.
 
    `open` registers the current project, ensures the viewer server is running, and opens/prints the project URL.
 
+6. When you want to point the user at one specific file (not the whole project canvas), get a deep link instead of hand-building a URL:
+
+   ```bash
+   npx @agentuse/artifacts url .agentuse/artifacts/<group>/index.md --full
+   ```
+
+   Pass the **file path** you just wrote (absolute or cwd-relative). The CLI resolves the project and the file's stable project-relative name and prints a link like `http://127.0.0.1:7878/p/<projectId>/a/<name>?full=1`. `--full` makes the viewer open that file fullscreen on load. This link is stable across edits (it is keyed on the file path, not its content), so prefer it over manually composing `/g/.../f/<id>` URLs from the manifest. Run `open` first (so the server is running and the project is registered), then `url --full` to hand the user the exact-doc link.
+
 ## Important behavior
 
 - `serve` is server lifecycle only. It does **not** register the current directory.
@@ -123,6 +131,7 @@ Rules:
 | --- | --- |
 | `init` | Create `./.agentuse/artifacts/` and register current project. Safe to rerun. |
 | `open [--port N] [--detach] [--no-browser]` | Register current project, ensure viewer is running, and open/print URL. |
+| `url [target] [--full]` | Print a viewer link. No target = project home. A target file path (or artifact name) = deep link to that file; add `--full` to open it fullscreen on load. |
 | `serve [--port N] [--detach] [--stop] [--fail-if-running]` | Start/stop/reuse viewer server only. No cwd registration. |
 | `list` | List supported artifacts discovered in the current project. |
 | `project list` | List registered projects. |

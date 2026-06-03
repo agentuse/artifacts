@@ -17,6 +17,7 @@ interface Route {
   expandedId?: string;
   drawerOpen?: boolean;
   panesHidden?: boolean;
+  full?: boolean;
 }
 
 function parseRoute(href: string): Route {
@@ -33,6 +34,7 @@ function parseRoute(href: string): Route {
   }
   if (u.searchParams.get("d") === "1") route.drawerOpen = true;
   if (u.searchParams.get("panes") === "0") route.panesHidden = true;
+  if (u.searchParams.get("full") === "1") route.full = true;
   return route;
 }
 
@@ -48,6 +50,7 @@ function navRoute(r: Route, replace = false): void {
   const params = new URLSearchParams();
   if (r.drawerOpen) params.set("d", "1");
   if (r.panesHidden) params.set("panes", "0");
+  if (r.full) params.set("full", "1");
   const query = params.toString();
   const path = "/" + parts.join("/") + (query ? `?${query}` : "");
   const cur = window.location.pathname + window.location.search;
@@ -255,6 +258,22 @@ export function App() {
     setRoute(next);
     navRoute(next, true);
   };
+
+  // `?full=1` deep links (composed by skills from a stable artifact name)
+  // auto-expand the matching artifact to fullscreen exactly once. This is a
+  // one-shot per artifactName so collapsing (Escape) does not immediately
+  // re-expand — manifest polling re-runs this effect every few seconds, and
+  // without the ref guard a cleared expandedId would be re-set on the next tick.
+  const autoExpandedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!route.full || !route.artifactName) return;
+    if (autoExpandedRef.current === route.artifactName) return;
+    if (selectedArtifacts.length === 0) return;
+    autoExpandedRef.current = route.artifactName;
+    const id = selectedArtifacts[0]![0];
+    if (route.expandedId !== id) onExpandedChange(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.full, route.artifactName, selectedArtifacts]);
 
   const refreshVisibleData = useCallback(async () => {
     await refreshProjects();
