@@ -134,6 +134,40 @@ describe("project-wide local artifact discovery", () => {
     expect(artifacts.map((a) => a.record.name)).toEqual(["report"]);
   });
 
+  it("caps project-wide discovery at maxProjectScanEntries without blocking on huge trees", () => {
+    writeSettings({
+      ignorePatterns: [],
+      projectWideDiscoveryEnabled: true,
+      maxProjectScanEntries: 50,
+    });
+    // 200 markdown files: more than the cap, so discovery must stop early
+    // instead of materializing every match.
+    for (let i = 0; i < 200; i += 1) {
+      writeFile(path.join(projectPath, "docs", `doc-${String(i).padStart(3, "0")}.md`), `# ${i}`);
+    }
+    // Artifact-root discovery is independent of the cap and must still surface.
+    writeFile(path.join(projectPath, ".agentuse", "artifacts", "report", "index.md"), "# Artifact");
+
+    const artifacts = listLocalArtifactsForProject(projectId, projectRecord());
+    const names = artifacts.map((a) => a.record.name);
+    expect(names).toContain("report");
+    expect(artifacts.length).toBeLessThan(200);
+  });
+
+  it("treats maxProjectScanEntries of 0 as unlimited", () => {
+    writeSettings({
+      ignorePatterns: [],
+      projectWideDiscoveryEnabled: true,
+      maxProjectScanEntries: 0,
+    });
+    for (let i = 0; i < 120; i += 1) {
+      writeFile(path.join(projectPath, "docs", `doc-${String(i).padStart(3, "0")}.md`), `# ${i}`);
+    }
+
+    const artifacts = listLocalArtifactsForProject(projectId, projectRecord());
+    expect(artifacts.length).toBe(120);
+  });
+
   it("resolves project files inside the project root only", () => {
     writeSettings({
       ignorePatterns: DEFAULT_IGNORE_PATTERNS,

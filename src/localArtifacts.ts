@@ -15,6 +15,9 @@ const LOCAL_ARTIFACTS_POSIX = ".agentuse/artifacts";
 const PROJECT_FILE_ID_PREFIX = "project:";
 const IMAGE_HEADER_BYTES = 256 * 1024;
 const imageDimsCache = new Map<string, { width: number; height: number } | null>();
+// Projects already warned about hitting the scan cap, so the message is logged
+// once per process instead of on every (cache-missed) manifest rebuild.
+const projectScanCapWarned = new Set<string>();
 
 export interface LocalArtifact {
   artifactId: string;
@@ -375,9 +378,14 @@ function listProjectFileArtifacts(
   const root = project.path;
   const artifacts: LocalArtifact[] = [];
   const stack: Array<{ absDir: string; relDir: string }> = [{ absDir: root, relDir: "" }];
-  const ignorePatterns = readSettings().ignorePatterns;
+  const settings = readSettings();
+  const ignorePatterns = settings.ignorePatterns;
+  // Bound the synchronous walk so a pathological project (e.g. a CMS export
+  // with millions of media files) can't block the event loop indefinitely.
+  const maxEntries = settings.maxProjectScanEntries;
+  let entriesVisited = 0;
 
-  while (stack.length > 0) {
+  scan: while (stack.length > 0) {
     const cur = stack.pop()!;
     let entries: fs.Dirent[];
     try {
@@ -388,6 +396,11 @@ function listProjectFileArtifacts(
     entries.sort((a, b) => a.name.localeCompare(b.name));
 
     for (const ent of entries) {
+      if (maxEntries > 0 && entriesVisited >= maxEntries) {
+        warnProjectScanCapped(projectId, project, maxEntries);
+        break scan;
+      }
+      entriesVisited += 1;
       const abs = path.join(cur.absDir, ent.name);
       const rel = toPosix(cur.relDir ? path.join(cur.relDir, ent.name) : ent.name);
 
@@ -426,6 +439,19 @@ function listProjectFileArtifacts(
   }
 
   return artifacts;
+}
+
+function warnProjectScanCapped(
+  projectId: string,
+  project: ProjectRecord,
+  maxEntries: number,
+): void {
+  if (projectScanCapWarned.has(projectId)) return;
+  projectScanCapWarned.add(projectId);
+  process.stderr.write(
+    `project-wide artifact discovery for "${project.name}" (${project.path}) stopped after ${maxEntries} entries; ` +
+      `add an ignore pattern, disable project-wide discovery, or raise maxProjectScanEntries for this large project\n`,
+  );
 }
 
 function uniqueProjectArtifactName(preferred: string, seenNames: Set<string>): string {

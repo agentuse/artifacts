@@ -61,6 +61,7 @@ This is why moving a project directory keeps its artifacts; rewriting git histor
 - Then it recursively scans the registered project for supported artifact files, skipping dependency/build/cache/temp/VCS/hidden config paths. Project-wide files use `projectRelPath` for serving and IDs are namespaced with `project:` to avoid collisions.
 - `ArtifactRecord.localEntry` remains artifact-root-relative and only exists for legacy `.agentuse/artifacts/` files. `ArtifactRecord.projectRelPath` is project-root-relative and is available for all discovered project-local files.
 - The synthetic `contentHash` for a legacy directory entry still folds in every sibling's `mtimeMs+size` so the viewer's iframe cache-busts when an asset (image, css) referenced via a relative URL is updated, even though the index file itself hasn't changed.
+- The project-wide scan is a synchronous walk that also reads image headers for every matched image, so a pathological project (e.g. a CMS export with a multi-GB media library) can block the event loop for minutes and hang the viewer. `listProjectFileArtifacts()` is bounded by `settings.maxProjectScanEntries` (default 10k dirents visited; `0` = unlimited). On hitting the cap it stops and logs a one-time-per-process warning naming the project. The artifact-root scan (`.agentuse/artifacts/`) is separate and uncapped, so a capped project still shows its real artifacts. Raise the cap, add an ignore pattern, or disable project-wide discovery for legitimately large projects.
 
 ### Viewer server (`src/server.ts`)
 

@@ -466,11 +466,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         if (!Array.isArray(ignorePatterns)) {
           throw new CliError("INVALID_INPUT", "ignorePatterns must be an array");
         }
+        const current = readSettings();
         const projectWideDiscoveryEnabled =
           typeof body.projectWideDiscoveryEnabled === "boolean"
             ? body.projectWideDiscoveryEnabled
-            : readSettings().projectWideDiscoveryEnabled;
-        const settings = writeSettings({ ignorePatterns, projectWideDiscoveryEnabled });
+            : current.projectWideDiscoveryEnabled;
+        const maxProjectScanEntries =
+          typeof body.maxProjectScanEntries === "number"
+            ? body.maxProjectScanEntries
+            : current.maxProjectScanEntries;
+        const settings = writeSettings({
+          ignorePatterns,
+          projectWideDiscoveryEnabled,
+          maxProjectScanEntries,
+        });
         invalidateManifestCache();
         sendJson(res, { defaultIgnorePatterns: DEFAULT_IGNORE_PATTERNS, settings });
         return;

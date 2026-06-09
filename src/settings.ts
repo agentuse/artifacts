@@ -5,7 +5,25 @@ import { settingsPath } from "./paths.js";
 export interface ViewerSettings {
   ignorePatterns: string[];
   projectWideDiscoveryEnabled: boolean;
+  maxProjectScanEntries: number;
 }
+
+export interface WriteSettingsInput {
+  ignorePatterns: unknown[];
+  projectWideDiscoveryEnabled?: boolean;
+  maxProjectScanEntries?: number;
+}
+
+// Cap on directory entries visited per project during whole-project discovery.
+// Whole-project discovery is a synchronous filesystem walk (and reads image
+// headers for every matched image), so an unbounded scan of a pathological
+// project (e.g. a CMS export with a multi-GB media library of millions of
+// images) blocks the Node event loop and makes the viewer hang. The manifest
+// cache rebuilds this scan periodically in the background, so the cap also
+// keeps each rebuild cheap enough not to stall the server. 10k is far more
+// than the stray docs/screenshots discovery is meant to surface, while keeping
+// a worst-case cold scan to a few seconds. 0 means unlimited (opt-in).
+export const DEFAULT_MAX_PROJECT_SCAN_ENTRIES = 10_000;
 
 export const DEFAULT_IGNORE_PATTERNS = [
   ".git/**",
@@ -49,13 +67,17 @@ export function readSettings(): ViewerSettings {
     typeof (raw as ViewerSettings).projectWideDiscoveryEnabled === "boolean"
       ? (raw as ViewerSettings).projectWideDiscoveryEnabled
       : true;
-  return { ignorePatterns, projectWideDiscoveryEnabled };
+  const maxProjectScanEntries = normalizeMaxScanEntries(
+    (raw as ViewerSettings).maxProjectScanEntries,
+  );
+  return { ignorePatterns, projectWideDiscoveryEnabled, maxProjectScanEntries };
 }
 
-export function writeSettings(next: ViewerSettings): ViewerSettings {
+export function writeSettings(next: WriteSettingsInput): ViewerSettings {
   const settings: ViewerSettings = {
     ignorePatterns: normalizeIgnorePatterns(next.ignorePatterns),
     projectWideDiscoveryEnabled: next.projectWideDiscoveryEnabled !== false,
+    maxProjectScanEntries: normalizeMaxScanEntries(next.maxProjectScanEntries),
   };
   fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
   const tmp = `${settingsPath()}.tmp.${process.pid}`;
@@ -68,7 +90,18 @@ export function defaultSettings(): ViewerSettings {
   return {
     ignorePatterns: [...DEFAULT_IGNORE_PATTERNS],
     projectWideDiscoveryEnabled: true,
+    maxProjectScanEntries: DEFAULT_MAX_PROJECT_SCAN_ENTRIES,
   };
+}
+
+// A missing/invalid value falls back to the default cap; a finite, non-negative
+// number is honored (0 = unlimited). This keeps older settings files working
+// and prevents a malformed value from silently disabling the cap.
+export function normalizeMaxScanEntries(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  return DEFAULT_MAX_PROJECT_SCAN_ENTRIES;
 }
 
 export function normalizeIgnorePatterns(patterns: unknown[]): string[] {
