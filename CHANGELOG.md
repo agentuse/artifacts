@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0 - 2026-06-09
+
+### Added
+
+- Added path-based artifact deep links through `artifacts url <target> --full`, so agents can hand users a stable link that opens a specific file fullscreen.
+- Added a `maxProjectScanEntries` setting to bound project-wide discovery in very large repositories while keeping the dedicated `.agentuse/artifacts` folder uncapped.
+
+### Improved
+
+- Rendered single newlines as line breaks in markdown previews, matching the way agent-written reports and notes are usually formatted.
+- Added the AgentUse mark as the viewer favicon.
+- Allowed text selection in fullscreen markdown artifacts so users can copy content directly from expanded reports.
+
+### Fixed
+
+- Stopped pathological project-wide scans from hanging the viewer indefinitely by capping synchronous directory traversal and warning once when the cap is reached.
+
 ## 0.2.1 - 2026-05-31
 
 ### Added
