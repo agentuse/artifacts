@@ -274,6 +274,10 @@ html, body, #root {
 }
 
 .list-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 13px 16px 7px;
   border-bottom: 1px solid var(--border);
   color: var(--muted);

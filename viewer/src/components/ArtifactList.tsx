@@ -4,6 +4,7 @@ import type { SortMode } from "../sort";
 
 const ROOT_GROUP = "";
 const PROJECT_GROUP_PREFIX = "project:";
+const RECENT_LIMIT = 100;
 
 interface FolderNode {
   name: string;
@@ -229,6 +230,22 @@ export function ArtifactList(props: {
     () => buildProjectTree(projectArtifacts, sort),
     [projectArtifacts, sort],
   );
+
+  // "Updated" flattens the whole project into one recency-sorted list so a
+  // just-changed file is visible at the top instead of buried in a subtree.
+  // A file discovered both as a curated package and via the project-wide scan
+  // is deduped on its on-disk path, keeping the package record.
+  const recentFiles = useMemo(() => {
+    const byPath = new Map<string, ArtifactRecord>();
+    for (const rec of artifacts) {
+      const key = rec.absolutePath ?? rec.name;
+      const existing = byPath.get(key);
+      if (!existing || (!existing.localEntry && rec.localEntry)) byPath.set(key, rec);
+    }
+    return [...byPath.values()]
+      .sort((a, b) => artifactTime(b) - artifactTime(a))
+      .slice(0, RECENT_LIMIT);
+  }, [artifacts]);
   const projectSelection = selectedProjectPath(selectedGroup);
   const allSelected = selected == null && selectedGroup == null;
 
@@ -312,7 +329,29 @@ export function ArtifactList(props: {
         <div className="list-item secondary">no artifacts yet</div>
       )}
 
-      {packageArtifacts.length > 0 && (
+      {sort === "updated" && recentFiles.length > 0 && (
+        <>
+          <div className="list-section">
+            Recently updated
+            {artifacts.length > recentFiles.length && (
+              <span className="group-count">{recentFiles.length}</span>
+            )}
+          </div>
+          {recentFiles.map((rec) => (
+            <div
+              key={rec.name}
+              className={`list-item${rec.name === selected ? " selected" : ""}`}
+              onClick={() => onSelect(rec.name)}
+              title={displayPath(rec)}
+            >
+              <div>{leafLabel(rec)}</div>
+              <div className="secondary">{displayPath(rec)}</div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {sort === "name" && packageArtifacts.length > 0 && (
         <>
           <div className="list-section">Artifact packages</div>
           {packageGroups.map(([key, list]) => {
@@ -352,7 +391,7 @@ export function ArtifactList(props: {
         </>
       )}
 
-      {projectArtifacts.length > 0 && (
+      {sort === "name" && projectArtifacts.length > 0 && (
         <>
           <div className="list-section">Project files</div>
           {projectTree.files.map((rec) => renderProjectFile(rec, 0))}
