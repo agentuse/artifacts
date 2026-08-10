@@ -141,6 +141,7 @@ export function App() {
           entryId={route.entryId}
           onBack={() => navigate({ entryId: undefined, filter: route.filter })}
           onOpenEntry={(entryId) => navigate({ entryId, filter: route.filter }, true)}
+          onFilter={(filter) => navigate({ entryId: undefined, filter })}
         />
         <Notice notification={notification} />
       </div>

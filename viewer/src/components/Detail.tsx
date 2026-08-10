@@ -9,9 +9,13 @@ export function Detail(props: {
   entryId: string;
   onBack: () => void;
   onOpenEntry: (entryId: string) => void;
+  onFilter: (filter: { projectId?: string; tag?: string }) => void;
 }) {
   const [detail, setDetail] = useState<EntryDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Owned here, not inside Actions, so Escape can dismiss the menu without
+  // also leaving the page — both listeners see the same keydown.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -29,13 +33,19 @@ export function Detail(props: {
     };
   }, [props.entryId]);
 
+  const onBack = props.onBack;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") props.onBack();
+      if (e.key !== "Escape") return;
+      if (menuOpen) {
+        setMenuOpen(false);
+        return;
+      }
+      onBack();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props]);
+  }, [menuOpen, onBack]);
 
   if (error) {
     return (
@@ -62,11 +72,31 @@ export function Detail(props: {
   const { entry, revisions } = detail;
   return (
     <div className="detail">
-      <DetailHead title={entry.title} onBack={props.onBack} entry={entry} />
+      <DetailHead
+        title={entry.title}
+        onBack={props.onBack}
+        entry={entry}
+        menuOpen={menuOpen}
+        onMenuOpenChange={setMenuOpen}
+      />
       <div className="detail-sub">
-        <span className="chip small">{entry.projectName}</span>
+        {/* Chips look tappable, so they are: both jump to the filtered feed. */}
+        <button
+          type="button"
+          className="chip small"
+          onClick={() => props.onFilter({ projectId: entry.projectId })}
+        >
+          {entry.projectName}
+        </button>
         {entry.tags.map((tag) => (
-          <span key={tag} className="chip small tag">#{tag}</span>
+          <button
+            key={tag}
+            type="button"
+            className="chip small tag"
+            onClick={() => props.onFilter({ tag })}
+          >
+            #{tag}
+          </button>
         ))}
         <span className="badge">{typeLabel(entry.type)}</span>
         <RelativeTime iso={entry.submittedAt} />
@@ -91,14 +121,26 @@ export function Detail(props: {
   );
 }
 
-function DetailHead(props: { title: string; onBack: () => void; entry?: FeedEntry }) {
+function DetailHead(props: {
+  title: string;
+  onBack: () => void;
+  entry?: FeedEntry;
+  menuOpen?: boolean;
+  onMenuOpenChange?: (open: boolean) => void;
+}) {
   return (
     <header className="detail-head">
       <button type="button" className="icon-btn" onClick={props.onBack} aria-label="back to feed" title="back (esc)">
         <ArrowLeft size={18} strokeWidth={1.75} />
       </button>
       <h1>{props.title}</h1>
-      {props.entry && <Actions entry={props.entry} />}
+      {props.entry && (
+        <Actions
+          entry={props.entry}
+          open={!!props.menuOpen}
+          onOpenChange={props.onMenuOpenChange ?? (() => {})}
+        />
+      )}
     </header>
   );
 }
@@ -110,29 +152,25 @@ type CopyState = null | "path" | "content" | "link";
  * exact file the agent submitted — notably the original, unsanitized HTML
  * rather than what the iframe renders.
  */
-function Actions(props: { entry: FeedEntry }) {
-  const [open, setOpen] = useState(false);
+function Actions(props: { entry: FeedEntry; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { open, onOpenChange } = props;
   const [copied, setCopied] = useState<CopyState>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const filename = props.entry.entry.split("/").pop() || props.entry.entry;
+  const setOpen = onOpenChange;
 
+  // Escape is handled by the parent, which knows whether the menu or the page
+  // should close. Here we only need the click-outside dismissal.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node | null;
       if (target && rootRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      onOpenChange(false);
     };
     window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open, onOpenChange]);
 
   const flash = (which: Exclude<CopyState, null>) => {
     setCopied(which);
@@ -155,7 +193,7 @@ function Actions(props: { entry: FeedEntry }) {
       <button
         type="button"
         className="icon-btn"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         aria-label="more actions"
         aria-haspopup="menu"
         aria-expanded={open}

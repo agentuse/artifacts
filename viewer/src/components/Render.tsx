@@ -213,19 +213,32 @@ function MarkdownExcerpt(props: { entry: FeedEntry }) {
   return <p className="card-excerpt">{excerpt}</p>;
 }
 
-/** Strip frontmatter, headings, and markup so the card shows readable prose. */
+/**
+ * Strip frontmatter, headings, and markup so the card shows readable prose.
+ * Headings are dropped rather than flattened: the card already shows the
+ * title, and keeping them made every excerpt open by repeating it.
+ */
 function excerptOf(raw: string): string {
-  const body = parseMarkdownFrontmatter(raw).body;
-  const plain = body
-    .replace(/```[\s\S]*?```/g, " ")
+  const body = parseMarkdownFrontmatter(raw)
+    .body.replace(/```[\s\S]*?```/g, " ")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/<[^>]+>/g, " ");
+  const withoutHeadings = body
+    .split("\n")
+    .filter((line) => !/^\s{0,3}#{1,6}\s+/.test(line))
+    .join("\n");
+  // A doc that is almost all headings would leave nothing, so fall back to
+  // the flattened text rather than showing an empty card.
+  const source = clean(withoutHeadings) || clean(body.replace(/^\s{0,3}#{1,6}\s+/gm, ""));
+  return source.length > PREVIEW_CHARS ? source.slice(0, PREVIEW_CHARS - 1) + "…" : source;
+}
+
+function clean(text: string): string {
+  return text
     .replace(/[*_`>|]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return plain.length > PREVIEW_CHARS ? plain.slice(0, PREVIEW_CHARS - 1) + "…" : plain;
 }
 
 function Frontmatter(props: { fields: FrontmatterField[] }) {
