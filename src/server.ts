@@ -7,28 +7,25 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { CliError } from "./errors.js";
 import { SCHEMA_VERSION } from "./manifest.js";
-import { rootDir, servePidPath } from "./paths.js";
+import {
+  feedEntryRevisions,
+  feedStamp,
+  queryFeed,
+  readFeedEntries,
+  type FeedEntry,
+} from "./feed.js";
+import { previewCacheDir, rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import {
-  buildLocalProjectSnapshot,
-  buildLocalManifestSnapshot,
   forgetProject,
   initProject,
   listRegisteredProjects,
   pruneMissingProjects,
-  type LocalArtifact,
-  resolveLocalProjectFile,
-  resolveProjectFile,
-} from "./localArtifacts.js";
-import {
-  DEFAULT_IGNORE_PATTERNS,
-  readSettings,
-  writeSettings,
-} from "./settings.js";
+} from "./projects.js";
+import { forgetProjectArtifacts, resolveBundleFile } from "./store.js";
 
 export const DEFAULT_PORT = 7878;
 const HOST = "127.0.0.1";
-const MANIFEST_CACHE_MS = 10_000;
 
 export interface ServeStatus {
   pid: number;
@@ -69,15 +66,19 @@ function viewerDistDir(): string {
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".markdown": "text/markdown; charset=utf-8",
   ".agentuse": "text/markdown; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
+  ".gif": "image/gif",
   ".pdf": "application/pdf",
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
@@ -87,7 +88,7 @@ const MIME: Record<string, string> = {
 };
 
 // CSP for the viewer SPA itself. HTML artifacts are loaded via
-// <iframe src="/api/render/:id"> — that response carries its own CSP header
+// <iframe src="/api/store/:id/..."> — that response carries its own CSP header
 // (META_CSP) and the parent SPA's CSP does NOT inherit into a src=-loaded
 // document, so this policy can stay tight without affecting artifact rendering.
 const SPA_CSP =
@@ -100,6 +101,15 @@ const SPA_CSP =
   "object-src 'none'; " +
   "base-uri 'none'; " +
   "connect-src 'self'";
+
+// Images don't execute, but defense in depth: kill everything but the bytes.
+const IMAGE_CSP = "default-src 'none'";
+
+const PREVIEW_WIDTHS = [320, 480, 720, 960, 1280, 1600, 2048];
+const PREVIEW_FORMAT = "webp";
+const PREVIEW_MIME = "image/webp";
+// Stored bundles are immutable: a re-submit writes a new rev with a new id.
+const IMMUTABLE_CACHE = "public, max-age=31536000, immutable";
 
 function send(
   res: http.ServerResponse,
@@ -123,159 +133,17 @@ function send(
   res.end(body);
 }
 
-// Lockdown CSP for image responses. Images don't execute, but defense in depth:
-// kill everything but the image itself.
-const IMAGE_CSP = "default-src 'none'";
-
-const BINARY_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  webp: "image/webp",
-  pdf: "application/pdf",
-};
-
-const PREVIEW_WIDTHS = [320, 480, 720, 960, 1280, 1600, 2048];
-const PREVIEW_FORMAT = "webp";
-const PREVIEW_MIME = "image/webp";
-
-interface ManifestCache {
-  builtAt: number;
-  json: string;
-  etag: string;
-  localArtifacts: Map<string, LocalArtifact>;
+function sendJson(res: http.ServerResponse, body: unknown, headers: Record<string, string> = {}): void {
+  send(res, 200, JSON.stringify(body), { "content-type": MIME[".json"]!, ...headers });
 }
 
-interface ProjectCache {
-  builtAt: number;
-  json: string;
-  etag: string;
-  localArtifacts: Map<string, LocalArtifact>;
-}
-
-let manifestCache: ManifestCache | null = null;
-let manifestRefreshQueued = false;
-const projectCaches = new Map<string, ProjectCache>();
-const projectRefreshQueued = new Set<string>();
-
-function invalidateManifestCache(): void {
-  manifestCache = null;
-  manifestRefreshQueued = false;
-  projectCaches.clear();
-  projectRefreshQueued.clear();
-}
-
-function rebuildManifestCache(): ManifestCache {
-  const snapshot = buildLocalManifestSnapshot();
-  const json = JSON.stringify(snapshot.manifest);
-  manifestCache = {
-    builtAt: Date.now(),
-    json,
-    etag: `"${createHash("sha256").update(json).digest("base64url").slice(0, 24)}"`,
-    localArtifacts: snapshot.localArtifacts,
-  };
-  return manifestCache;
-}
-
-function queueManifestRefresh(): void {
-  if (manifestRefreshQueued) return;
-  manifestRefreshQueued = true;
-  setTimeout(() => {
-    try {
-      rebuildManifestCache();
-    } catch (e) {
-      console.warn(`manifest refresh failed: ${(e as Error).message}`);
-    } finally {
-      manifestRefreshQueued = false;
-    }
-  }, 0);
-}
-
-function getManifestCache(): ManifestCache {
-  if (!manifestCache) return rebuildManifestCache();
-  if (Date.now() - manifestCache.builtAt >= MANIFEST_CACHE_MS) {
-    queueManifestRefresh();
-  }
-  return manifestCache;
-}
-
-function getCachedLocalArtifactById(id: string): LocalArtifact | undefined {
-  for (const cache of projectCaches.values()) {
-    const artifact = cache.localArtifacts.get(id);
-    if (artifact) return artifact;
-  }
-  return getManifestCache().localArtifacts.get(id);
-}
-
-function buildProjectCache(projectId: string): ProjectCache {
-  const snapshot = buildLocalProjectSnapshot(projectId);
-  const json = JSON.stringify({
-    projectId,
-    artifacts: snapshot.artifacts,
-    latest: snapshot.latest,
+function sendNotModified(res: http.ServerResponse, etag: string, cacheControl: string): void {
+  res.writeHead(304, {
+    "cache-control": cacheControl,
+    etag,
+    "x-content-type-options": "nosniff",
   });
-  const cache = {
-    builtAt: Date.now(),
-    json,
-    etag: `"${createHash("sha256").update(json).digest("base64url").slice(0, 24)}"`,
-    localArtifacts: snapshot.localArtifacts,
-  };
-  projectCaches.set(projectId, cache);
-  return cache;
-}
-
-function queueProjectRefresh(projectId: string): void {
-  if (projectRefreshQueued.has(projectId)) return;
-  projectRefreshQueued.add(projectId);
-  setTimeout(() => {
-    try {
-      buildProjectCache(projectId);
-    } catch (e) {
-      console.warn(`project manifest refresh failed: ${(e as Error).message}`);
-    } finally {
-      projectRefreshQueued.delete(projectId);
-    }
-  }, 0);
-}
-
-function getProjectCache(projectId: string): ProjectCache {
-  const cache = projectCaches.get(projectId);
-  if (!cache) return buildProjectCache(projectId);
-  if (Date.now() - cache.builtAt >= MANIFEST_CACHE_MS) {
-    queueProjectRefresh(projectId);
-  }
-  return cache;
-}
-
-const PROJECT_FILE_EXTENSIONS = new Set([
-  ".html",
-  ".htm",
-  ".md",
-  ".markdown",
-  ".agentuse",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-  ".pdf",
-  ".css",
-  ".svg",
-  ".ico",
-  ".woff2",
-  ".woff",
-  ".ttf",
-  ".otf",
-]);
-
-function projectFileCsp(ext: string): string | null | undefined {
-  if (ext === ".pdf") return null;
-  if (ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp" || ext === ".svg") {
-    return IMAGE_CSP;
-  }
-  return undefined;
-}
-
-function sendJson(res: http.ServerResponse, body: unknown, status = 200): void {
-  send(res, status, JSON.stringify(body), { "content-type": MIME[".json"]! });
+  res.end();
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
@@ -303,12 +171,12 @@ function bodyObject(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>;
 }
 
-function isImageArtifact(local: LocalArtifact): boolean {
-  return (
-    local.record.type === "png" ||
-    local.record.type === "jpg" ||
-    local.record.type === "webp"
-  );
+function findEntry(id: string): FeedEntry | undefined {
+  return readFeedEntries().find((e) => e.id === id);
+}
+
+function etagOf(...parts: string[]): string {
+  return `"${createHash("sha256").update(parts.join("\0")).digest("base64url").slice(0, 24)}"`;
 }
 
 function previewWidth(raw: string | null): number {
@@ -321,32 +189,17 @@ function previewWidth(raw: string | null): number {
   return PREVIEW_WIDTHS.find((w) => w >= clamped) ?? PREVIEW_WIDTHS[PREVIEW_WIDTHS.length - 1]!;
 }
 
-function previewCachePath(local: LocalArtifact, width: number): string {
+async function readOrCreatePreview(entry: FeedEntry, absPath: string, width: number): Promise<Buffer> {
   const key = createHash("sha256")
-    .update(local.artifactId)
-    .update("\0")
-    .update(local.record.contentHash)
-    .update("\0")
-    .update(String(width))
+    .update(`${entry.id}\0${entry.contentHash}\0${width}`)
     .digest("hex");
-  return path.join(rootDir(), "preview-cache", `${key}.${PREVIEW_FORMAT}`);
-}
-
-async function readOrCreatePreview(local: LocalArtifact, width: number): Promise<Buffer> {
-  const outPath = previewCachePath(local, width);
+  const outPath = path.join(previewCacheDir(), `${key}.${PREVIEW_FORMAT}`);
   if (fs.existsSync(outPath)) return fs.readFileSync(outPath);
 
-  const buf = await sharp(local.absPath, { failOn: "none" })
+  const buf = await sharp(absPath, { failOn: "none" })
     .rotate()
-    .resize({
-      width,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .webp({
-      quality: 78,
-      effort: 4,
-    })
+    .resize({ width, fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 78, effort: 4 })
     .toBuffer();
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -361,7 +214,51 @@ async function readOrCreatePreview(local: LocalArtifact, width: number): Promise
       /* ignore */
     }
   }
-  return fs.existsSync(outPath) ? fs.readFileSync(outPath) : buf;
+  return buf;
+}
+
+function isImageType(type: FeedEntry["type"]): boolean {
+  return type === "png" || type === "jpg" || type === "webp";
+}
+
+/**
+ * Serve one file out of a stored bundle. HTML is sanitized on every read (so
+ * sanitizer fixes apply to already-stored artifacts); support files pass
+ * through with a type-appropriate CSP.
+ */
+function sendBundleFile(res: http.ServerResponse, absPath: string): void {
+  if (!fs.existsSync(absPath) || fs.statSync(absPath).isDirectory()) {
+    send(res, 404, "not found");
+    return;
+  }
+  const ext = path.extname(absPath).toLowerCase();
+  if (ext === ".html" || ext === ".htm") {
+    const safe = buildSafeSrcdoc(fs.readFileSync(absPath, "utf8"));
+    send(res, 200, safe, {
+      "content-type": MIME[".html"]!,
+      "content-security-policy": META_CSP,
+      "x-frame-options": "SAMEORIGIN",
+      "cache-control": IMMUTABLE_CACHE,
+    });
+    return;
+  }
+  const csp =
+    ext === ".pdf"
+      ? null
+      : ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp" || ext === ".gif" || ext === ".svg"
+        ? IMAGE_CSP
+        : undefined;
+  send(
+    res,
+    200,
+    fs.readFileSync(absPath),
+    {
+      "content-type": MIME[ext] ?? "application/octet-stream",
+      "content-disposition": "inline",
+      "cache-control": IMMUTABLE_CACHE,
+    },
+    { csp },
+  );
 }
 
 function serveStatic(res: http.ServerResponse, dir: string, file: string): void {
@@ -392,22 +289,134 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   const url = new URL(req.url ?? "/", `http://${HOST}`);
   const pathname = url.pathname;
 
-  if (pathname === "/api/manifest") {
+  // /api/feed -> newest-first page plus project/tag facets for the chips.
+  if (pathname === "/api/feed" && req.method === "GET") {
     try {
-      const cache = getManifestCache();
-      if (req.headers["if-none-match"] === cache.etag) {
-        res.writeHead(304, {
-          "cache-control": "no-store",
-          "etag": cache.etag,
-          "x-content-type-options": "nosniff",
-        });
-        res.end();
+      const etag = etagOf(feedStamp(), url.search);
+      if (req.headers["if-none-match"] === etag) {
+        sendNotModified(res, etag, "no-store");
         return;
       }
-      send(res, 200, cache.json, {
-        "content-type": MIME[".json"]!,
-        "etag": cache.etag,
+      const page = queryFeed({
+        projectId: url.searchParams.get("project") ?? undefined,
+        tag: url.searchParams.get("tag") ?? undefined,
+        q: url.searchParams.get("q") ?? undefined,
+        limit: numberParam(url.searchParams.get("limit")),
+        cursor: numberParam(url.searchParams.get("cursor")),
       });
+      sendJson(res, page, { etag });
+    } catch (e) {
+      send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  // /api/entry/{id} -> one entry plus its revision history.
+  const entryMatch = /^\/api\/entry\/([A-Za-z0-9_]+)$/.exec(pathname);
+  if (entryMatch && req.method === "GET") {
+    try {
+      const entries = readFeedEntries();
+      const entry = entries.find((e) => e.id === entryMatch[1]!);
+      if (!entry) {
+        send(res, 404, "not found");
+        return;
+      }
+      sendJson(res, {
+        entry,
+        revisions: feedEntryRevisions(entries, entry.projectId, entry.slug),
+      });
+    } catch (e) {
+      send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  // /api/store/{entryId}/{path...} -> a file inside the stored bundle. An
+  // empty path serves the entry file, so relative URLs inside HTML resolve
+  // against a real directory.
+  const storeMatch = /^\/api\/store\/([A-Za-z0-9_]+)(?:\/(.*))?$/.exec(pathname);
+  if (storeMatch && req.method === "GET") {
+    try {
+      const entry = findEntry(storeMatch[1]!);
+      if (!entry) {
+        send(res, 404, "not found");
+        return;
+      }
+      sendBundleFile(res, resolveBundleFile(entry, storeMatch[2] ?? ""));
+    } catch (e) {
+      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
+      send(res, code, (e as Error).message);
+    }
+    return;
+  }
+
+  // /api/preview/{entryId}?w=960 -> cached WebP thumbnail for image entries.
+  // Feed cards use this; the detail view requests the original bytes.
+  const previewMatch = /^\/api\/preview\/([A-Za-z0-9_]+)$/.exec(pathname);
+  if (previewMatch && req.method === "GET") {
+    try {
+      const entry = findEntry(previewMatch[1]!);
+      if (!entry) {
+        send(res, 404, "not found");
+        return;
+      }
+      if (!isImageType(entry.type)) {
+        send(res, 400, "not an image artifact");
+        return;
+      }
+      const width = previewWidth(url.searchParams.get("w"));
+      const etag = `"${entry.contentHash}:${width}:${PREVIEW_FORMAT}"`;
+      if (req.headers["if-none-match"] === etag) {
+        sendNotModified(res, etag, IMMUTABLE_CACHE);
+        return;
+      }
+      const absPath = resolveBundleFile(entry, entry.entry);
+      const buf = await readOrCreatePreview(entry, absPath, width);
+      send(
+        res,
+        200,
+        buf,
+        {
+          "content-type": PREVIEW_MIME,
+          "content-disposition": "inline",
+          "cache-control": IMMUTABLE_CACHE,
+          etag,
+        },
+        { csp: IMAGE_CSP },
+      );
+    } catch (e) {
+      send(res, 500, (e as Error).message);
+    }
+    return;
+  }
+
+  // /api/raw/{entryId} -> the entry file exactly as submitted, as an
+  // attachment. Safe to expose unsanitized because octet-stream + attachment
+  // makes the browser save it instead of executing it at this origin.
+  const rawMatch = /^\/api\/raw\/([A-Za-z0-9_]+)$/.exec(pathname);
+  if (rawMatch && req.method === "GET") {
+    try {
+      const entry = findEntry(rawMatch[1]!);
+      if (!entry) {
+        send(res, 404, "not found");
+        return;
+      }
+      const absPath = resolveBundleFile(entry, entry.entry);
+      if (!fs.existsSync(absPath)) {
+        send(res, 404, "not found");
+        return;
+      }
+      const basename = (entry.entry.split("/").pop() || entry.entry).replace(/[\r\n"\\]/g, "_");
+      send(
+        res,
+        200,
+        fs.readFileSync(absPath),
+        {
+          "content-type": "application/octet-stream",
+          "content-disposition": `attachment; filename="${basename}"`,
+        },
+        { csp: null },
+      );
     } catch (e) {
       send(res, 500, (e as Error).message);
     }
@@ -426,81 +435,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     return;
   }
 
-  const projectManifestMatch = /^\/api\/projects\/([^/]+)\/manifest$/.exec(pathname);
-  if (projectManifestMatch && req.method === "GET") {
-    try {
-      const projectId = decodeURIComponent(projectManifestMatch[1]!);
-      const cache = getProjectCache(projectId);
-      if (req.headers["if-none-match"] === cache.etag) {
-        res.writeHead(304, {
-          "cache-control": "no-store",
-          "etag": cache.etag,
-          "x-content-type-options": "nosniff",
-        });
-        res.end();
-        return;
-      }
-      send(res, 200, cache.json, {
-        "content-type": MIME[".json"]!,
-        "etag": cache.etag,
-      });
-    } catch (e) {
-      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 404 : 500;
-      send(res, code, (e as Error).message);
-    }
-    return;
-  }
-
-  if (pathname === "/api/settings") {
-    try {
-      if (req.method === "GET") {
-        sendJson(res, {
-          defaultIgnorePatterns: DEFAULT_IGNORE_PATTERNS,
-          settings: readSettings(),
-        });
-        return;
-      }
-      if (req.method === "PUT") {
-        const body = bodyObject(await readJsonBody(req));
-        const ignorePatterns = body.ignorePatterns;
-        if (!Array.isArray(ignorePatterns)) {
-          throw new CliError("INVALID_INPUT", "ignorePatterns must be an array");
-        }
-        const current = readSettings();
-        const projectWideDiscoveryEnabled =
-          typeof body.projectWideDiscoveryEnabled === "boolean"
-            ? body.projectWideDiscoveryEnabled
-            : current.projectWideDiscoveryEnabled;
-        const maxProjectScanEntries =
-          typeof body.maxProjectScanEntries === "number"
-            ? body.maxProjectScanEntries
-            : current.maxProjectScanEntries;
-        const settings = writeSettings({
-          ignorePatterns,
-          projectWideDiscoveryEnabled,
-          maxProjectScanEntries,
-        });
-        invalidateManifestCache();
-        sendJson(res, { defaultIgnorePatterns: DEFAULT_IGNORE_PATTERNS, settings });
-        return;
-      }
-      send(res, 405, "method not allowed");
-    } catch (e) {
-      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
-      send(res, code, (e as Error).message);
-    }
-    return;
-  }
-
   if (pathname === "/api/projects" && req.method === "POST") {
     try {
       const body = bodyObject(await readJsonBody(req));
       if (typeof body.path !== "string" || !body.path.trim()) {
         throw new CliError("INVALID_INPUT", "path is required");
       }
-      const out = await initProject(body.path);
-      invalidateManifestCache();
-      sendJson(res, out);
+      sendJson(res, await initProject(body.path));
     } catch (e) {
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
       send(res, code, (e as Error).message);
@@ -510,9 +451,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
 
   if (pathname === "/api/projects/prune" && req.method === "POST") {
     try {
-      const removed = await pruneMissingProjects();
-      invalidateManifestCache();
-      sendJson(res, { removed });
+      sendJson(res, { removed: await pruneMissingProjects() });
     } catch (e) {
       send(res, 500, (e as Error).message);
     }
@@ -523,8 +462,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   if (deleteProjectMatch && req.method === "DELETE") {
     try {
       const out = await forgetProject(decodeURIComponent(deleteProjectMatch[1]!));
-      invalidateManifestCache();
-      sendJson(res, out);
+      const droppedArtifacts = await forgetProjectArtifacts(out.projectId);
+      sendJson(res, { ...out, droppedArtifacts });
     } catch (e) {
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
       send(res, code, (e as Error).message);
@@ -532,284 +471,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     return;
   }
 
-  // /api/preview/{artifactId}?w=960 -> cached WebP thumbnail for image
-  // artifacts. Canvas tiles use this path; fullscreen/download still request
-  // the original bytes. The contentHash query param from the viewer makes
-  // these effectively immutable until the source file changes.
-  const previewMatch = /^\/api\/preview\/([A-Za-z0-9_]+)$/.exec(pathname);
-  if (previewMatch) {
-    const id = previewMatch[1]!;
-    try {
-      const local = getCachedLocalArtifactById(id);
-      if (!local) {
-        send(res, 404, "not found");
-        return;
-      }
-      if (!isImageArtifact(local)) {
-        send(res, 400, "not an image artifact");
-        return;
-      }
-      const width = previewWidth(url.searchParams.get("w"));
-      const buf = await readOrCreatePreview(local, width);
-      const etag = `"${local.record.contentHash}:${width}:${PREVIEW_FORMAT}"`;
-      if (req.headers["if-none-match"] === etag) {
-        res.writeHead(304, {
-          "cache-control": "public, max-age=31536000, immutable",
-          "etag": etag,
-        });
-        res.end();
-        return;
-      }
-      send(
-        res,
-        200,
-        buf,
-        {
-          "content-type": PREVIEW_MIME,
-          "content-disposition": "inline",
-          "cache-control": "public, max-age=31536000, immutable",
-          "etag": etag,
-        },
-        { csp: IMAGE_CSP },
-      );
-    } catch (e) {
-      send(res, 500, (e as Error).message);
-    }
-    return;
-  }
+  // Static viewer. Everything that isn't a real asset falls back to the SPA.
+  const file = pathname.replace(/^\/+/, "");
+  serveStatic(res, opts.dist, file || "index.html");
+}
 
-  // /api/artifact/{artifactId}  -> raw bytes for everything except HTML
-  // (HTML routes through /api/render/:id for sanitization).
-  const artMatch = /^\/api\/artifact\/([A-Za-z0-9_]+)$/.exec(pathname);
-  if (artMatch) {
-    const id = artMatch[1]!;
-    try {
-      const local = getCachedLocalArtifactById(id);
-      if (!local) {
-        send(res, 404, "not found");
-        return;
-      }
-      const rec = local.record;
-      if (rec.type === "html") {
-        send(res, 400, "use /api/render/:id for HTML artifacts");
-        return;
-      }
-      const buf = fs.readFileSync(local.absPath);
-      if (rec.type === "markdown" || rec.type === "agentuse") {
-        send(res, 200, buf, { "content-type": "text/markdown; charset=utf-8" });
-        return;
-      }
-      const mime = BINARY_MIME[rec.type];
-      if (!mime) {
-        send(res, 500, `unhandled type: ${rec.type}`);
-        return;
-      }
-      // PDF: omit CSP so the browser's PDF viewer (Firefox PDF.js especially)
-      // can run unconstrained. Origin isolation comes from the iframe sandbox
-      // in the viewer, not from CSP. Image: lock down with default-src 'none'.
-      send(
-        res,
-        200,
-        buf,
-        {
-          "content-type": mime,
-          "content-disposition": "inline",
-        },
-        { csp: rec.type === "pdf" ? null : IMAGE_CSP },
-      );
-    } catch (e) {
-      send(res, 500, (e as Error).message);
-    }
-    return;
-  }
-
-  // /api/raw/{artifactId}  -> original file bytes, octet-stream + attachment.
-  // Used by the viewer's Download and Copy actions so they hand back the
-  // exact file the agent wrote (notably: unsanitized HTML, no CSP meta tag).
-  // Safe to expose because the response is `application/octet-stream` with
-  // `Content-Disposition: attachment` — the browser saves it instead of
-  // rendering, so no script execution happens at this origin. In-viewer
-  // rendering still routes through /api/render/:id, which keeps the
-  // sanitizer.
-  const rawMatch = /^\/api\/raw\/([A-Za-z0-9_]+)$/.exec(pathname);
-  if (rawMatch) {
-    const id = rawMatch[1]!;
-    try {
-      const local = getCachedLocalArtifactById(id);
-      if (!local) {
-        send(res, 404, "not found");
-        return;
-      }
-      const rec = local.record;
-      const buf = fs.readFileSync(local.absPath);
-      const basename = (rec.name.split("/").pop() || rec.name).replace(
-        /[\r\n"\\]/g,
-        "_",
-      );
-      send(
-        res,
-        200,
-        buf,
-        {
-          "content-type": "application/octet-stream",
-          "content-disposition": `attachment; filename="${basename}"`,
-        },
-        { csp: null },
-      );
-    } catch (e) {
-      send(res, 500, (e as Error).message);
-    }
-    return;
-  }
-
-  // /api/project-artifacts/{projectId}/{path...} -> project-local live
-  // artifact files rooted at <project>/.agentuse/artifacts/. HTML is
-  // sanitized; other files are served as static bytes. Relative URLs inside
-  // HTML work naturally because the iframe URL is the real file path.
-  const localPrefixMatch = /^\/api\/project-artifacts\/([A-Za-z0-9_]+)\/(.*)$/.exec(pathname);
-  if (localPrefixMatch) {
-    const projectId = localPrefixMatch[1]!;
-    const relInput = localPrefixMatch[2]!;
-    try {
-      const file = resolveLocalProjectFile(projectId, relInput);
-      let abs = file.absPath;
-      if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
-        const indexHtml = path.join(abs, "index.html");
-        const indexAgentuse = path.join(abs, "index.agentuse");
-        const indexMd = path.join(abs, "index.md");
-        abs = fs.existsSync(indexHtml)
-          ? indexHtml
-          : fs.existsSync(indexAgentuse)
-            ? indexAgentuse
-            : indexMd;
-      }
-      if (!abs || !fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
-        send(res, 404, "not found");
-        return;
-      }
-      const ext = path.extname(abs).toLowerCase();
-      if (ext === ".html" || ext === ".htm") {
-        const safe = buildSafeSrcdoc(fs.readFileSync(abs, "utf8"));
-        send(res, 200, safe, {
-          "content-type": "text/html; charset=utf-8",
-          "content-security-policy": META_CSP,
-          "x-frame-options": "SAMEORIGIN",
-        });
-        return;
-      }
-      if (ext === ".md" || ext === ".markdown" || ext === ".agentuse") {
-        send(res, 200, fs.readFileSync(abs), { "content-type": "text/markdown; charset=utf-8" });
-        return;
-      }
-      const csp = ext === ".pdf" ? null : ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp" ? IMAGE_CSP : undefined;
-      send(
-        res,
-        200,
-        fs.readFileSync(abs),
-        { "content-type": MIME[ext] ?? "application/octet-stream" },
-        { csp },
-      );
-    } catch (e) {
-      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
-      send(res, code, (e as Error).message);
-    }
-    return;
-  }
-
-  // /api/project-files/{projectId}/{path...} -> project-local live files
-  // rooted at the registered project. This powers whole-project discovery
-  // while avoiding a general-purpose file server: ignored paths and
-  // unsupported extensions are rejected before bytes are returned.
-  const projectFileMatch = /^\/api\/project-files\/([A-Za-z0-9_]+)\/(.*)$/.exec(pathname);
-  if (projectFileMatch) {
-    const projectId = projectFileMatch[1]!;
-    const relInput = projectFileMatch[2]!;
-    try {
-      const file = resolveProjectFile(projectId, relInput);
-      let abs = file.absPath;
-      if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
-        const indexHtml = path.join(abs, "index.html");
-        const indexAgentuse = path.join(abs, "index.agentuse");
-        const indexMd = path.join(abs, "index.md");
-        abs = fs.existsSync(indexHtml)
-          ? indexHtml
-          : fs.existsSync(indexAgentuse)
-            ? indexAgentuse
-            : indexMd;
-      }
-      if (!abs || !fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
-        send(res, 404, "not found");
-        return;
-      }
-      const ext = path.extname(abs).toLowerCase();
-      if (!PROJECT_FILE_EXTENSIONS.has(ext)) {
-        send(res, 404, "not found");
-        return;
-      }
-      if (ext === ".html" || ext === ".htm") {
-        const safe = buildSafeSrcdoc(fs.readFileSync(abs, "utf8"));
-        send(res, 200, safe, {
-          "content-type": "text/html; charset=utf-8",
-          "content-security-policy": META_CSP,
-          "x-frame-options": "SAMEORIGIN",
-        });
-        return;
-      }
-      if (ext === ".md" || ext === ".markdown" || ext === ".agentuse") {
-        send(res, 200, fs.readFileSync(abs), { "content-type": "text/markdown; charset=utf-8" });
-        return;
-      }
-      send(
-        res,
-        200,
-        fs.readFileSync(abs),
-        { "content-type": MIME[ext] ?? "application/octet-stream" },
-        { csp: projectFileCsp(ext) },
-      );
-    } catch (e) {
-      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
-      send(res, code, (e as Error).message);
-    }
-    return;
-  }
-
-  // /api/render/{artifactId}  -> sanitized HTML served as text/html with its
-  // own CSP header. Loaded via <iframe src=...> with sandbox="allow-scripts"
-  // (no allow-same-origin), so it lives in an opaque origin isolated from the
-  // viewer. Direct browser navigation here is rare; the CSP still applies
-  // (connect-src 'none') so even direct nav cannot phone home or scan LAN.
-  const renderMatch = /^\/api\/render\/([A-Za-z0-9_]+)$/.exec(pathname);
-  if (renderMatch) {
-    const id = renderMatch[1]!;
-    try {
-      const local = getCachedLocalArtifactById(id);
-      if (!local) {
-        send(res, 404, "not found");
-        return;
-      }
-      if (local.record.type !== "html") {
-        send(res, 400, "not an html artifact");
-        return;
-      }
-      const buf = fs.readFileSync(local.absPath);
-      const safe = buildSafeSrcdoc(buf.toString("utf8"));
-      send(res, 200, safe, {
-        "content-type": "text/html; charset=utf-8",
-        "content-security-policy": META_CSP,
-        "x-frame-options": "SAMEORIGIN",
-      });
-    } catch (e) {
-      send(res, 500, (e as Error).message);
-    }
-    return;
-  }
-
-  // Static viewer.
-  let file = pathname.replace(/^\/+/, "");
-  if (file === "" || file.startsWith("p/") || file.startsWith("a/")) {
-    file = "index.html";
-  }
-  serveStatic(res, opts.dist, file);
+function numberParam(raw: string | null): number | undefined {
+  if (raw == null) return undefined;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 export interface StartOptions {

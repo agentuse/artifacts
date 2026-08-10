@@ -20,58 +20,41 @@ export interface ProjectInfo {
   path: string;
 }
 
-export interface ArtifactRecord {
+/** One submission, as returned by /api/feed and /api/entry/:id. */
+export interface FeedEntry {
+  id: string;
   projectId: string;
-  name: string;
+  projectName: string;
+  slug: string;
+  rev: number;
+  title: string;
+  tags: string[];
   type: ArtifactType;
-  revision: number;
-  contentHash: string;
+  /** Entry file path relative to the bundle root. */
+  entry: string;
+  files: number;
   size: number;
-  createdAt: string;
-  /** Agent-supplied initial tile size in CSS px. Suggestion only — the
-   *  viewer's persisted user-resize wins, and small values get floored. */
-  suggestedWidth?: number;
-  suggestedHeight?: number;
-  /** Natural pixel dimensions for image artifacts (png/jpg/webp), probed at
-   *  ingest. Used to pick a tile default whose aspect ratio matches the
-   *  image so non-square images don't letterbox. Lower precedence than a
-   *  user resize or the agent-supplied suggestedWidth/Height. */
+  contentHash: string;
+  sourcePath: string;
+  submittedAt: string;
   naturalWidth?: number;
   naturalHeight?: number;
-  local?: boolean;
-  localEntry?: string;
-  /** POSIX path relative to the registered project root for project-wide
-   *  artifact discovery. */
-  projectRelPath?: string;
-  /** Host-native on-disk path for the primary file. Set by the server for
-   *  local artifacts; used by the "Copy path" action. */
-  absolutePath?: string;
 }
 
-export interface Manifest {
-  schemaVersion: number;
-  projects: Record<string, ProjectRecord>;
-  artifacts: Record<string, ArtifactRecord>;
-  latest: Record<string, Record<string, string>>;
+export interface FeedPage {
+  entries: FeedEntry[];
+  nextCursor: number | null;
+  total: number;
+  projects: Array<{ projectId: string; projectName: string; count: number }>;
+  tags: Array<{ tag: string; count: number }>;
+}
+
+export interface EntryDetail {
+  entry: FeedEntry;
+  revisions: FeedEntry[];
 }
 
 export interface ProjectIndex {
   schemaVersion: number;
   projects: Record<string, ProjectRecord>;
-}
-
-export interface ProjectManifest {
-  projectId: string;
-  artifacts: Record<string, ArtifactRecord>;
-  latest: Record<string, string>;
-}
-
-export interface ViewerSettings {
-  ignorePatterns: string[];
-  projectWideDiscoveryEnabled: boolean;
-}
-
-export interface SettingsResponse {
-  defaultIgnorePatterns: string[];
-  settings: ViewerSettings;
 }

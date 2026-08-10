@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.0 - 2026-08-10
+
+A rewrite around one idea: an artifact reaches the viewer because an agent **submitted** it, not because a scanner found it.
+
+### Added
+
+- `artifacts submit <path>` copies a file or a whole directory bundle into `~/.agentuse/artifacts/store/` and appends one line to an append-only feed log. Prints the artifact's URL. It registers the project itself, so no setup step is needed.
+- `--title`, `--tag` (repeatable or comma-separated), and `--slug` on submit. Titles fall back to markdown frontmatter, the first heading, or the HTML `<title>`.
+- `artifacts feed` lists submissions newest-first, with `--project`, `--tag`, `--limit`, and `--all-revisions`.
+- `artifacts import` submits everything already sitting in a project's `.agentuse/artifacts/`, the migration path from 0.3.x.
+- `artifacts prune [--keep N]` deletes superseded revisions from the store.
+- Revisions: re-submitting the same slug adds `rev N` instead of a duplicate card, and the detail page links every revision. Byte-identical re-submits with unchanged title and tags are a no-op.
+
+### Changed
+
+- **The viewer is a feed.** One reverse-chronological column with filter chips for project and tag, search, and a detail page per artifact. Routes are now `/` and `/a/:entryId`.
+- **Mobile is the primary target.** Single column, 44px touch targets, lazy card previews, safe-area insets, and pinch-zoom re-enabled.
+- Artifacts are copied into the store rather than referenced in place, so a feed entry keeps working after the source file is edited, gitignored away, or deleted with its branch.
+- `artifacts url` now prints the feed URL for the current project; `open` opens the feed filtered to it.
+- `project forget` also deletes that project's submitted artifacts. Pass `--keep-artifacts` to keep them.
+
+### Removed
+
+- Project-wide file discovery, along with the ignore-pattern settings, the `maxProjectScanEntries` cap, and the Settings sheet that configured them. The Projects sheet remains for add/forget/prune.
+- The pan/zoom canvas, tile resizing, and persisted tile sizes.
+- `artifacts list`, `artifacts url <target> --full`, and the `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, and `/api/settings` routes.
+
+### Upgrading
+
+Existing artifacts are no longer discovered automatically. Run `npx @agentuse/artifacts import` once per project to publish what is already in `.agentuse/artifacts/`, and update any agent instructions to call `submit` after writing a file. Old `/p/:projectId/a/:name` links do not resolve; the feed is at `/`.
+
 ## 0.3.0 - 2026-06-09
 
 ### Added

@@ -10,8 +10,16 @@ export function rootDir(): string {
 export function manifestPath(): string {
   return path.join(rootDir(), "manifest.json");
 }
-export function settingsPath(): string {
-  return path.join(rootDir(), "settings.json");
+/** Append-only submission log. One JSON object per line, oldest first. */
+export function feedPath(): string {
+  return path.join(rootDir(), "feed.jsonl");
+}
+/** Root of the copied artifact bundles: store/<projectId>/<slug>/<rev>/. */
+export function storeDir(): string {
+  return path.join(rootDir(), "store");
+}
+export function previewCacheDir(): string {
+  return path.join(rootDir(), "preview-cache");
 }
 export function lockPath(): string {
   return path.join(rootDir(), ".lock");

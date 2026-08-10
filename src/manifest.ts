@@ -12,56 +12,20 @@ export interface ProjectRecord {
   updatedAt?: string;
 }
 
-export interface ArtifactRecord {
-  projectId: string;
-  name: string;
-  type: "markdown" | "agentuse" | "html" | "png" | "jpg" | "webp" | "pdf";
-  revision: number;
-  contentHash: string;
-  size: number;
-  createdAt: string;
-  /** Agent-supplied initial tile size (pixels) for the viewer. The viewer
-   *  treats these as suggestions only — the user's persisted resize wins,
-   *  and the viewer floors them at its own minimums. Adding these is a
-   *  purely additive schema change; old manifests read fine (missing =
-   *  undefined), so we deliberately do NOT bump SCHEMA_VERSION. */
-  suggestedWidth?: number;
-  suggestedHeight?: number;
-  /** Natural pixel dimensions for image artifacts (png/jpg/webp), probed
-   *  from the file header at ingest time. The viewer uses these to pick a
-   *  default tile size that matches the image's aspect ratio so square
-   *  tiles don't letterbox portrait/landscape images. Lower precedence
-   *  than suggestedWidth/Height and a user resize. Additive, no schema
-   *  bump. */
-  naturalWidth?: number;
-  naturalHeight?: number;
-  /** Project-local live artifact fields. projectRelPath is the primary file's
-   *  path relative to the project root (POSIX separators). localEntry is still
-   *  set for artifacts under <project>/.agentuse/artifacts/ and remains
-   *  relative to that artifact root for backwards-compatible URLs/grouping.
-   *  absolutePath is host-native so the viewer can offer "copy path" without
-   *  reconstructing it client-side. These fields are never persisted into the
-   *  on-disk manifest (buildLocalManifest fills them on every read). */
-  local?: boolean;
-  localEntry?: string;
-  projectRelPath?: string;
-  absolutePath?: string;
-}
-
+/**
+ * The registry is only a project index now. Submitted artifacts live in the
+ * append-only feed log (`feed.jsonl`) plus the bundle store, neither of which
+ * goes through this file — so the registry stays small and rarely written.
+ */
 export interface Manifest {
   schemaVersion: number;
   projects: Record<string, ProjectRecord>;
-  artifacts: Record<string, ArtifactRecord>;
-  /** project_id -> name -> latest artifact_id */
-  latest: Record<string, Record<string, string>>;
 }
 
 function emptyManifest(): Manifest {
   return {
     schemaVersion: SCHEMA_VERSION,
     projects: {},
-    artifacts: {},
-    latest: {},
   };
 }
 
@@ -93,11 +57,9 @@ export function readManifest(): Manifest {
       `manifest schemaVersion ${m.schemaVersion} != ${SCHEMA_VERSION}`,
     );
   }
-  // Defensive defaults for forward-compat reads.
+  // Defensive default for forward-compat reads.
   m.projects ??= {};
-  m.artifacts ??= {};
-  m.latest ??= {};
-  return m;
+  return { schemaVersion: m.schemaVersion, projects: m.projects };
 }
 
 export function writeManifestAtomic(manifest: Manifest): void {

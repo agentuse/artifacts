@@ -1,40 +1,23 @@
 ---
 name: agentuse-artifacts
-description: Save substantial markdown/HTML deliverables as project-local, viewable artifacts using @agentuse/artifacts. Generated outputs should usually be grouped under ./.agentuse/artifacts/, while existing supported project files can be viewed in place. Use proactively whenever you generate or identify a report, plan, spec, HTML page, dashboard, chart, or rendered document the user will want to preview in a browser. Also triggers on "save as artifact", "preview this", "render this", "make it viewable", "artifact".
+description: Submit substantial deliverables to the @agentuse/artifacts feed so the user can browse them on desktop or phone. Use proactively whenever you generate a report, plan, spec, HTML page, dashboard, chart, screenshot, or rendered document the user will want to look at. Also triggers on "save as artifact", "preview this", "render this", "make it viewable", "artifact".
 ---
 
 # agentuse-artifacts
 
-Use `@agentuse/artifacts` to save AI-generated deliverables into a project-local artifact directory and preview generated or existing project files in the local viewer.
+`@agentuse/artifacts` is a feed of things agents made. You write files as usual, then **submit** them. Submitting copies the files into a central store and adds one entry to a reverse-chronological feed the user browses at `http://127.0.0.1:7878/`.
 
-Primary model for newly generated outputs: create one folder per artifact group under `./.agentuse/artifacts/`. If multiple outputs come from the same task, topic, report, or deliverable package, put them in the same folder so the viewer canvas shows them together. Single standalone outputs can still use their own folder.
-
-```txt
-<project>/.agentuse/artifacts/
-  client-report/
-    summary.md
-    findings.md
-    dashboard.html
-  market-analysis/
-    index.md
-  dashboard/
-    index.html
-    style.css
-    chart.png
-```
-
-Artifacts are normal project files. The viewer also discovers supported files that already live elsewhere in the registered project, so do not copy an existing `docs/report.md`, `agents/daily.agentuse`, `screenshots/flow.png`, or similar project file just to make it visible. Support files work through relative paths.
+Submitting is the only way an artifact reaches the feed. Writing a file into `.agentuse/artifacts/` no longer publishes it on its own.
 
 ## When to use this
 
 Use this skill when:
 - You produced a substantial markdown report, plan, spec, analysis, or summary.
 - You generated an HTML page, dashboard, chart, slide, mockup, or rendered document.
-- Multiple generated files belong to the same topic, report, client, analysis, or task.
-- The artifact needs support files like CSS, PNG/JPG/WebP images, fonts, etc.
+- You captured a screenshot or produced an image or PDF worth keeping.
 - The user said "save this", "preview this", "render this", "make it viewable", or "artifact".
 
-Do NOT use for ephemeral one-line answers or normal source-code changes that already belong elsewhere in the repo.
+Do NOT submit ephemeral one-line answers or ordinary source-code changes.
 
 ## CLI invocation
 
@@ -44,275 +27,150 @@ Prefer:
 npx @agentuse/artifacts <command> [options]
 ```
 
-If working inside the package checkout, use:
+Inside the package checkout, use `npm run dev -- <command>`. Most commands accept `--json`.
 
-```bash
-npm run dev -- <command> [options]
-```
+## Standard workflow
 
-Most commands accept `--json`.
+1. **Write the file(s).** Put generated output in `./.agentuse/artifacts/<name>/`, which is gitignored scratch space in most projects. A single file is fine too.
 
-## Standard workflow for agents
-
-1. Initialize the project once if needed:
+2. **Submit it.**
 
    ```bash
-   npx @agentuse/artifacts init
+   npx @agentuse/artifacts submit .agentuse/artifacts/q2-market-analysis --tag research --tag q2
    ```
 
-2. Choose the artifact group folder.
+   `submit` prints the artifact's URL. It registers the project on its own, so `init` is optional.
 
-   Use one URL-safe folder for everything the user will think of as one package:
-
-   ```txt
-   .agentuse/artifacts/<artifact-group>/
-   ```
-
-   Put related files in that same folder instead of creating many sibling folders:
-
-   ```txt
-   .agentuse/artifacts/<artifact-group>/summary.md
-   .agentuse/artifacts/<artifact-group>/details.md
-   .agentuse/artifacts/<artifact-group>/dashboard.html
-   ```
-
-   For a single standalone deliverable, use one folder with an entry file such as `index.md` or `index.html`.
-
-3. Put support files next to the files that use them and reference them relatively:
-
-   ```html
-   <link rel="stylesheet" href="./style.css">
-   <img src="./chart.png" alt="Chart">
-   ```
-
-4. List/check artifacts:
-
-   ```bash
-   npx @agentuse/artifacts list --json
-   ```
-
-5. Tell the user how to view it:
+3. **Give the user the URL** that `submit` printed. If the viewer is not running yet, start it once:
 
    ```bash
    npx @agentuse/artifacts open
    ```
 
-   `open` registers the current project, ensures the viewer server is running, and opens/prints the project URL.
+## What a bundle is
 
-6. When you want to point the user at one specific file (not the whole project canvas), get a deep link instead of hand-building a URL:
+`submit` takes either a single file or a directory.
 
-   ```bash
-   npx @agentuse/artifacts url .agentuse/artifacts/<group>/index.md --full
-   ```
+- **A directory is one artifact.** Its entry file is `index.html`, `index.md`, or `index.agentuse`; every sibling file (CSS, images, fonts, SVG) is copied with it, so relative paths keep working.
+- **A single file is a one-file artifact.** `report.md`, `chart.png`, `deck.pdf`.
 
-   Pass the **file path** you just wrote (absolute or cwd-relative). The CLI resolves the project and the file's stable project-relative name and prints a link like `http://127.0.0.1:7878/p/<projectId>/a/<name>?full=1`. `--full` makes the viewer open that file fullscreen on load. This link is stable across edits (it is keyed on the file path, not its content), so prefer it over manually composing `/g/.../f/<id>` URLs from the manifest. Run `open` first (so the server is running and the project is registered), then `url --full` to hand the user the exact-doc link.
+```txt
+.agentuse/artifacts/customer-report/
+  index.html        <- entry file
+  style.css
+  chart.png
+```
 
-## Important behavior
+If a directory has several renderable files and no `index.*`, `submit` fails and asks for one. That is deliberate: an artifact has exactly one thing to open.
 
-- `serve` is server lifecycle only. It does **not** register the current directory.
-- `init` creates `./.agentuse/artifacts/` and registers the current project.
-- `open` registers/updates the current project and starts/reuses the viewer.
-- Project files are never deleted by registry commands.
-- HTML is sanitized when rendered; keep using relative files for local CSS/images.
+Limits: 25MB and 200 files per bundle. `node_modules`, `.git`, `dist`, `build`, and dotfiles are skipped.
 
-## Existing project files
+## Titles, tags, and slugs
 
-When the user asks to "send", "save", or "preview" an existing project file as an artifact (e.g. `/agentuse-artifacts send path/to/foo.md`), treat the original file as the source of truth and leave it in place. The viewer scans supported files across the registered project, so a copy under `.agentuse/artifacts/<group>/` is no longer required for plain Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, or PDF files.
+- **Title** comes from `--title`, else markdown frontmatter `title:`, else the first `#` heading, else the HTML `<title>`, else the slug. Pass `--title` when the file's own heading would read badly in a feed.
+- **Tags** come from `--tag`, repeatable or comma-separated. Tags become filter chips in the viewer, so use ones the user would filter by: the client, the project area, the kind of work. Lowercase, max 12.
+- **Slug** is the artifact's identity, derived from the path. Re-submitting the same slug adds a **revision** instead of a second card. Pass `--slug` to control it.
 
-Rules:
-- Do not move, delete, or duplicate an existing supported project file just to make it viewable.
-- If the file is already in a supported format, register/open the project and point the user to the viewer.
-- If the project file needs a derived artifact (for example, rendering a Markdown source into a richer HTML dashboard), write the derived output under `.agentuse/artifacts/<group>/` and say which original file it came from.
-- If the user edits the original source later, update only the source unless there is an intentional derived artifact that must be regenerated.
+Re-submitting byte-identical content with the same title and tags is a no-op, it will not spam the feed, so it is safe to submit again after a re-run.
 
 ## Command reference
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Create `./.agentuse/artifacts/` and register current project. Safe to rerun. |
-| `open [--port N] [--detach] [--no-browser]` | Register current project, ensure viewer is running, and open/print URL. |
-| `url [target] [--full]` | Print a viewer link. No target = project home. A target file path (or artifact name) = deep link to that file; add `--full` to open it fullscreen on load. |
-| `serve [--port N] [--detach] [--stop] [--fail-if-running]` | Start/stop/reuse viewer server only. No cwd registration. |
-| `list` | List supported artifacts discovered in the current project. |
+| `submit <path> [--title T] [--tag T...] [--slug S] [--open]` | Copy a file or directory into the store and add it to the feed. Prints the URL. |
+| `feed [--project ID] [--tag T] [--limit N] [--all-revisions]` | List submitted artifacts, newest first. |
+| `import [dir]` | One-shot migration: submit everything already in `<dir>/.agentuse/artifacts/`. |
+| `prune [--keep N]` | Delete superseded revisions from the store (default: keep 5 per artifact). |
+| `open [--port N] [--detach] [--no-browser]` | Register the project, ensure the viewer is running, open the feed filtered to it. |
+| `url [--all]` | Print the feed URL, filtered to the current project unless `--all`. |
+| `serve [--port N] [--detach] [--stop] [--fail-if-running]` | Start/stop the viewer server only. Does not register the cwd. |
+| `init` | Create `./.agentuse/artifacts/` and register the project. Optional; `submit` registers too. |
 | `project list` | List registered projects. |
-| `project add [dir]` | Register a project directory and create its `.agentuse/artifacts` folder. |
-| `project forget <projectId\|path>` | Remove project from registry only; does not delete files. |
-| `project prune` | Forget registry entries whose paths no longer exist; does not delete files. |
-| `where` | Print global registry/storage root, default `~/.agentuse/artifacts/`. |
+| `project add [dir]` | Register a project directory. |
+| `project forget <projectId\|path> [--keep-artifacts]` | Forget a project and delete its submitted artifacts. `--keep-artifacts` keeps them. |
+| `project prune` | Forget registry entries whose paths no longer exist. |
+| `where` | Print the storage root, default `~/.agentuse/artifacts/`. |
 
-## Artifact layout conventions
+## Naming
 
-Use one subdirectory per artifact group. Preferred grouped package:
-
-```txt
-.agentuse/artifacts/research-package/
-  summary.md
-  evidence.md
-  recommendations.md
-  dashboard.html
-```
-
-Preferred HTML artifact with support files:
-
-```txt
-.agentuse/artifacts/customer-report/
-  index.html
-  style.css
-  chart.png
-```
-
-Preferred standalone markdown artifact:
-
-```txt
-.agentuse/artifacts/market-analysis/
-  index.md
-```
-
-Directory artifacts are detected when they contain supported files such as `index.html`, `index.md`, `index.agentuse`, or other markdown/AgentUse/HTML files. The viewer canvas shows files in the artifact group together, so do not create separate sibling folders for files that belong to the same package.
-
-Name artifact group folders after the user-facing deliverable, not the file type. Use lowercase URL-safe kebab case.
-
-Naming pattern:
+Name the slug after the deliverable, not the file type. Lowercase kebab case, shortest unambiguous form:
 
 ```txt
 <scope>-<subject>-<artifact-kind>
 ```
 
-Use the shortest name that stays unambiguous:
+- `scope`: optional app, package, client, or platform. Include it in monorepos or multi-client work.
+- `subject`: required feature, page, flow, campaign, research topic, or decision area.
+- `artifact-kind`: optional report, mockup, audit, plan, spec, dashboard, review.
 
-- `scope`: optional app, package, client, domain, platform, or audience. Include this in monorepos or multi-client work.
-- `subject`: required feature, page, flow, campaign, research topic, client problem, or decision area.
-- `artifact-kind`: optional report, package, mockup, audit, plan, spec, dashboard, or review.
-
-Good names:
-
-```txt
-checkout-redesign
-web-checkout-mockup
-admin-settings-review
-mobile-onboarding-flow
-q2-market-analysis
-customer-support-audit
-pricing-page-cro-report
-```
-
-Avoid vague catch-all names:
-
-```txt
-design-mockup
-report
-notes
-final
-artifact
-```
-
-If related outputs share the same scope and subject, keep them in one folder. If they are different apps, features, clients, or decisions, use separate folders.
+Good: `checkout-redesign`, `web-checkout-mockup`, `q2-market-analysis`, `pricing-page-cro-report`.
+Avoid: `report`, `notes`, `final`, `artifact`.
 
 ## Examples
 
-### Save an HTML artifact with CSS and image support files
+### An HTML artifact with support files
 
 ```bash
-npx @agentuse/artifacts init
-mkdir -p .agentuse/artifacts/demo
-cat > .agentuse/artifacts/demo/index.html <<'EOF'
+mkdir -p .agentuse/artifacts/customer-report
+cat > .agentuse/artifacts/customer-report/index.html <<'EOF'
 <!doctype html>
 <html>
 <head>
+  <title>Customer report</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <h1>Demo</h1>
+  <h1>Customer report</h1>
   <img src="./chart.png" alt="Chart">
 </body>
 </html>
 EOF
-cat > .agentuse/artifacts/demo/style.css <<'EOF'
+cat > .agentuse/artifacts/customer-report/style.css <<'EOF'
 body { font-family: system-ui; padding: 32px; }
-h1 { color: #c2410c; }
 EOF
-npx @agentuse/artifacts open
+npx @agentuse/artifacts submit .agentuse/artifacts/customer-report --tag client-acme
 ```
 
-Then tell the user:
-
-> Saved to `.agentuse/artifacts/demo/index.html`. View it with `npx @agentuse/artifacts open`.
-
-### Save a grouped artifact package
+### A standalone markdown report
 
 ```bash
-npx @agentuse/artifacts init
-mkdir -p .agentuse/artifacts/research-package
-cat > .agentuse/artifacts/research-package/summary.md <<'EOF'
-# Summary
+cat > .agentuse/artifacts/q2-market-analysis.md <<'EOF'
+# Q2 market analysis
 ...
 EOF
-cat > .agentuse/artifacts/research-package/recommendations.md <<'EOF'
-# Recommendations
-...
-EOF
-cat > .agentuse/artifacts/research-package/evidence.md <<'EOF'
-# Evidence
-...
-EOF
-npx @agentuse/artifacts list --json
+npx @agentuse/artifacts submit .agentuse/artifacts/q2-market-analysis.md --tag research
 ```
 
-### Save a design or mockup package
+### An existing project file
+
+Nothing needs moving, submit it where it is. The store keeps a copy, and the entry records the original path.
 
 ```bash
-npx @agentuse/artifacts init
-mkdir -p .agentuse/artifacts/web-checkout-mockup
-cat > .agentuse/artifacts/web-checkout-mockup/index.html <<'EOF'
-<!doctype html>
-<html>
-<head>
-  <link rel="stylesheet" href="./style.css">
-</head>
-<body>
-  <main>Mockup content...</main>
-</body>
-</html>
-EOF
-cat > .agentuse/artifacts/web-checkout-mockup/notes.md <<'EOF'
-# Design Notes
-...
-EOF
-npx @agentuse/artifacts open
+npx @agentuse/artifacts submit docs/architecture.md --tag docs
 ```
 
-For monorepos, include app/package/platform context in the folder name, such as `web-checkout-mockup`, `ios-onboarding-flow`, or `admin-settings-review`.
-
-### Save a standalone markdown report
+### A screenshot
 
 ```bash
-npx @agentuse/artifacts init
-mkdir -p .agentuse/artifacts/market-analysis
-cat > .agentuse/artifacts/market-analysis/index.md <<'EOF'
-# Market Analysis
-...
-EOF
-npx @agentuse/artifacts list --json
+npx @agentuse/artifacts submit tmp/checkout-flow.png --title "Checkout flow, step 3" --tag qa
 ```
 
-### Register another project
+### Migrating a project that predates the feed
 
 ```bash
-npx @agentuse/artifacts project add /path/to/project
-npx @agentuse/artifacts project list
+npx @agentuse/artifacts import
 ```
 
-### Remove a stale project from viewer registry
+## Important behavior
 
-```bash
-npx @agentuse/artifacts project forget proj_abc123
-```
-
-This only removes the registry entry. It does not delete `.agentuse/artifacts` files.
+- **`submit` copies.** Editing the original file afterwards does not change what was submitted; submit again to add a revision. This is intentional, a feed entry is a snapshot of a moment.
+- The store grows with every revision. Run `prune` occasionally, or when the user asks about disk use.
+- `project forget` **does** delete that project's submitted artifacts from the store (use `--keep-artifacts` to keep them). It never touches the project's own files.
+- HTML is sanitized at render time and runs in a sandboxed iframe. Keep using relative paths for local CSS and images.
+- `serve` is server lifecycle only; it does not register the current directory.
 
 ## Safety notes
 
-- Save newly generated artifact packages under `./.agentuse/artifacts/` by default. Existing supported project files can stay where they already live.
-- Use relative asset paths in HTML/markdown.
-- Do not tell users that `project prune` deletes files; it only forgets missing project registry entries.
-- Prefer `open` when the user wants to view the artifact; prefer `serve` only when managing the server itself.
+- Never submit secrets, `.env` files, credentials, or private keys. The store is plain files on disk and the viewer may be reachable from the user's other devices.
+- Use relative asset paths in HTML and markdown.
+- Prefer `submit` + the printed URL over hand-building viewer links.

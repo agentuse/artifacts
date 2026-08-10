@@ -1,8 +1,8 @@
 <h1 align="center">@agentuse/artifacts</h1>
 
 <p align="center">
-  <strong>A local-first artifact viewer for AI agents.</strong><br/>
-  Save reports, dashboards, screenshots, and plans as real files, then browse them in one live gallery.
+  <strong>A local-first artifact feed for AI agents.</strong><br/>
+  Agents submit reports, dashboards, screenshots, and plans. You browse them newest-first, on your laptop or your phone.
 </p>
 
 <p align="center">
@@ -15,9 +15,9 @@
   <img src="screenshot.png" alt="@agentuse/artifacts viewer screenshot" width="900">
 </p>
 
-AI agents produce useful files, but those files often end up buried in a transcript or scattered across a project. `@agentuse/artifacts` gives them a predictable home and gives you a fast local viewer for everything they make.
+AI agents produce useful files, but those files end up buried in a transcript or scattered across a project. `@agentuse/artifacts` gives agents one command to publish a deliverable, and gives you one page to read everything they made.
 
-Version 0.2.0 adds project-wide discovery: the viewer can find supported artifact files across registered project directories, not only inside `.agentuse/artifacts`. You can turn that broader scan off in the viewer Settings sheet if you only want the dedicated artifact folder.
+Version 0.4.0 replaces file discovery with an explicit submit step. An agent runs `artifacts submit <path>`; the CLI copies the file, or the whole directory, assets included, into a local store and appends one line to a feed log. The viewer is a reverse-chronological feed of those submissions, filterable by project and tag, and laid out for a phone first.
 
 ## Install
 
@@ -48,8 +48,8 @@ Requires Node.js 20+.
 | Agent type | Recommended setup |
 | --- | --- |
 | Claude Code, Cursor, Codex, Windsurf, Cline, and other interactive coding agents | Install the Skill with `npx skills add agentuse/artifacts`, then ask the agent to save reports or dashboards as artifacts. |
-| AgentUse and other async/scheduled agents | Install the same Skill globally with `npx skills add agentuse/artifacts -g`, then tell the agent to write outputs under `.agentuse/artifacts/<name>/index.md` or `.html`. |
-| Custom runners, CI jobs, and shell scripts | Write supported files directly into `.agentuse/artifacts` or anywhere in a registered project, then open the viewer with `npx @agentuse/artifacts open`. |
+| AgentUse and other async/scheduled agents | Install the same Skill globally with `npx skills add agentuse/artifacts -g`, then let the agent submit its output when a run finishes. |
+| Custom runners, CI jobs, and shell scripts | Call `npx @agentuse/artifacts submit <path> --tag <tag>` at the end of the job. No setup step: submit registers the project itself. |
 | Remote VMs or chat-based agents | Run the viewer on the machine where artifacts are written. It binds to `127.0.0.1:7878`; use SSH port forwarding, Tailscale Serve, or another private tunnel to view it from your laptop. |
 
 If the `skills` CLI does not know your agent yet, copy `skills/agentuse-artifacts/SKILL.md` into that agent's skill or instruction directory. The underlying contract is just files on disk plus the local viewer.
@@ -64,57 +64,53 @@ render this plan as a viewable HTML artifact
 /agentuse-artifacts drop this to artifacts
 ```
 
-The Skill guides the agent toward this layout:
+The agent writes the file, then submits it:
 
-```text
-<project>/.agentuse/artifacts/
-  market-analysis/index.md
-  customer-report/index.html
-  customer-report/chart.png
+```bash
+npx @agentuse/artifacts submit .agentuse/artifacts/customer-report --tag client-acme
 ```
 
-Open the viewer from any registered project:
+A directory is submitted as one bundle: `index.html` plus its CSS, images, and fonts, so relative paths keep working. A single file works too. `submit` prints the artifact's URL.
+
+Open the feed:
 
 ```bash
 npx @agentuse/artifacts open
 ```
 
-The viewer renders Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, and PDF files. HTML artifacts are sanitized and loaded in a sandboxed iframe.
+The viewer renders Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, and PDF. HTML artifacts are sanitized and loaded in a sandboxed iframe.
 
-## What 0.2.0 Changes
+## What 0.4.0 Changes
 
-- Project-wide artifact discovery is on by default for registered projects.
-- The Settings sheet can add/remove projects, edit ignore patterns, and disable project-wide discovery.
-- The viewer lazy-loads only the selected project's artifact inventory for better performance.
-- Markdown, AgentUse, HTML, image, and PDF previews render directly on the canvas.
-- Canvas navigation, image zoom, mobile behavior, and hot reload performance are improved.
+- **Submit replaces discovery.** Artifacts reach the feed because an agent submitted them, not because a scanner found them. No more whole-project filesystem walks on every poll.
+- **The viewer is a feed.** One reverse-chronological column, filter chips for project and tag, search, and a detail page per artifact. The pan/zoom canvas is gone.
+- **Built for a phone.** Single column, 44px touch targets, lazy previews, pinch-zoom re-enabled.
+- **Artifacts are copied, not referenced.** A feed entry is a snapshot: it still opens after the source file is edited, gitignored away, or deleted with the branch.
+- **Revisions are free.** Re-submitting the same slug adds a revision; identical content is a no-op, so re-runs don't spam the feed.
+- Settings, ignore patterns, and the project-scan cap are gone with the scanner that needed them.
 
-## Discovery Rules
-
-The dedicated `.agentuse/artifacts` folder is always scanned. This is still the best place for generated agent output.
-
-When project-wide discovery is enabled, the viewer also scans registered project roots for supported files:
-
-```text
-docs/report.md
-agents/daily.agentuse
-screenshots/flow.png
-dashboards/revenue.html
-```
-
-Dependency, build, cache, VCS, hidden dot paths, and configured ignore patterns are skipped. Manage these patterns in Settings.
-
-Viewer state lives under:
+## Storage
 
 ```text
 ~/.agentuse/artifacts/
-  manifest.json
-  settings.json
+  feed.jsonl                              append-only submission log
+  store/<projectId>/<slug>/<rev>/         copied bundles
+  manifest.json                           project registry
   preview-cache/
   .serve.pid
 ```
 
 Set `AGENTUSE_ARTIFACTS_HOME` to use a different storage root.
+
+Every re-submit writes a new revision, so the store grows. `artifacts prune` keeps the newest 5 revisions per artifact and deletes the rest.
+
+### Migrating from 0.3.x
+
+Artifacts that lived in `.agentuse/artifacts/` are no longer discovered automatically. Publish them once per project:
+
+```bash
+npx @agentuse/artifacts import
+```
 
 ## CLI
 
@@ -122,11 +118,14 @@ Every command supports `--json`.
 
 | Command | Description |
 | --- | --- |
-| `artifacts init` | Register the current directory and create `.agentuse/artifacts`. |
-| `artifacts open [--port N] [--detach] [--no-browser]` | Register the current project, start or reuse the viewer, and print its URL. |
+| `artifacts submit <path> [--title T] [--tag T...] [--slug S] [--open]` | Copy a file or directory into the store and add it to the feed. Prints the URL. |
+| `artifacts feed [--project ID] [--tag T] [--limit N] [--all-revisions]` | List submitted artifacts, newest first. |
+| `artifacts import [dir]` | Submit everything already in `<dir>/.agentuse/artifacts/`. |
+| `artifacts prune [--keep N]` | Delete superseded revisions from the store (default: keep 5). |
+| `artifacts open [--port N] [--detach] [--no-browser]` | Register the current project, start or reuse the viewer, open its feed. |
+| `artifacts url [--all]` | Print the feed URL, filtered to the current project unless `--all`. |
 | `artifacts serve [--port N] [--detach] [--stop] [--fail-if-running]` | Manage only the local viewer server. |
-| `artifacts list` | List supported artifacts discovered in the current project. |
-| `artifacts url [name]` | Print a viewer URL for the project or a specific artifact name. |
+| `artifacts init` | Create `.agentuse/artifacts` and register the project. Optional; submit registers too. |
 | `artifacts where` | Print the global storage path. |
 | `artifacts project list / add / forget / prune` | Manage registered project directories. |
 
@@ -134,11 +133,14 @@ Every command supports `--json`.
 
 Stored HTML artifacts are treated as untrusted:
 
-- HTML is parsed and sanitized at render time.
+- HTML is parsed and sanitized at render time, so sanitizer fixes apply to artifacts already in the store.
 - Rendered HTML gets a strict CSP with `connect-src 'none'`.
 - HTML runs inside an iframe sandbox without `allow-same-origin`.
+- Bundle paths are resolved inside the bundle root; `..` and encoded variants are rejected.
 
 Do not relax these defaults casually. Artifacts are often generated from untrusted web pages, PRs, scraped docs, and model output.
+
+The server binds to `127.0.0.1`. To read the feed from a phone, put a private tunnel in front of it (Tailscale Serve, SSH forwarding) rather than changing the bind address.
 
 ## Development
 

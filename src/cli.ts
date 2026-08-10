@@ -1,19 +1,18 @@
-import fs from "node:fs";
-import path from "node:path";
 import { Command } from "commander";
 import { CliError, ErrorEnvelope, envelope, exitCodeFor } from "./errors.js";
-import { viewerArtifactUrl, viewerProjectUrl } from "./artifacts.js";
+import { viewerEntryUrl, viewerFeedUrl } from "./artifacts.js";
+import { queryFeed, type FeedEntry } from "./feed.js";
 import { rootDir } from "./paths.js";
 import { resolveProject } from "./project.js";
 import {
   forgetProject,
   initProject,
-  listLocalArtifactsForCurrentProject,
   listRegisteredProjects,
   openBrowser,
   pruneMissingProjects,
   registerProjectPath,
-} from "./localArtifacts.js";
+} from "./projects.js";
+import { forgetProjectArtifacts, importLocalArtifacts, pruneStore, submitArtifact } from "./store.js";
 import {
   DEFAULT_PORT,
   isServerRunning,
@@ -57,57 +56,128 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function realpathOrResolve(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return path.resolve(p);
-  }
+function fmtEntry(entry: FeedEntry): string {
+  const tags = entry.tags.length ? `  [${entry.tags.join(" ")}]` : "";
+  return `  ${entry.submittedAt}  ${entry.projectName}  ${entry.title}${tags}  (${entry.id})`;
 }
 
-/**
- * Turn a `url` target into a `{ projectId, name }` pair. The viewer's `/a/:name`
- * route matches on the artifact's `name`, which is NOT always the file's
- * project-relative path: legacy `.agentuse/artifacts/<group>/index.*` files are
- * named `<group>`, siblings are `<group>/<file>`, while discovered project files
- * are named by their project-relative path. To avoid duplicating that logic, we
- * scan the project and match the target file's realpath against each artifact's
- * absolute path, then use the scanned `name` as the source of truth.
- *
- * Fallbacks: an existing file that isn't a discovered artifact uses its
- * project-relative path; a target that isn't a file on disk is treated as a
- * literal artifact name in the cwd's project.
- */
-function resolveArtifactName(target: string): { projectId: string; name: string } {
-  const abs = path.resolve(target);
-  let isFile = false;
-  try {
-    isFile = fs.statSync(abs).isFile();
-  } catch {
-    isFile = false;
+function currentPort(): number {
+  return isServerRunning()?.port ?? DEFAULT_PORT;
+}
+
+function positiveInt(raw: string | undefined, label: string): number | undefined {
+  if (raw == null) return undefined;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new CliError("INVALID_INPUT", `${label} must be a positive integer`);
   }
-  if (isFile) {
-    const real = realpathOrResolve(abs);
-    const { project, artifacts } = listLocalArtifactsForCurrentProject(path.dirname(real));
-    const match = artifacts.find((a) => realpathOrResolve(a.absPath) === real);
-    if (match) return { projectId: project.projectId, name: match.record.name };
-    // File exists but isn't a discovered artifact (unsupported type, ignored
-    // path, or discovery disabled): best-effort project-relative path.
-    const name = path.relative(project.path, real).split(path.sep).join("/");
-    return { projectId: project.projectId, name };
-  }
-  // Not a file on disk: treat as a literal artifact name in the cwd's project.
-  const project = resolveProject();
-  return { projectId: project.projectId, name: target };
+  return n;
 }
 
 export async function runCli(argv: string[]): Promise<void> {
   const program = new Command();
   program
     .name("artifacts")
-    .description("Collect and view artifacts emitted by AI agents")
+    .description("Submit artifacts from AI agents and browse them in a local feed")
     .option("--json", "emit machine-readable JSON")
     .allowExcessArguments(false);
+
+  program
+    .command("submit")
+    .description(
+      "Copy a file or directory into the artifact store and add it to the feed. " +
+        "A directory becomes one bundle (index.html/index.md plus its assets).",
+    )
+    .argument("<path>", "file or directory to submit")
+    .option("--title <title>", "feed title (default: derived from the file)")
+    .option("--tag <tag...>", "tag for filtering; repeatable or comma-separated")
+    .option("--slug <slug>", "stable key for this artifact (default: derived from the path)")
+    .option("--open", "open the artifact in the browser after submitting")
+    .action(async (target: string, opts: Record<string, string | string[] | boolean>) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const result = await submitArtifact({
+          target,
+          title: typeof opts.title === "string" ? opts.title : undefined,
+          tags: Array.isArray(opts.tag) ? opts.tag : typeof opts.tag === "string" ? [opts.tag] : [],
+          slug: typeof opts.slug === "string" ? opts.slug : undefined,
+        });
+        const url = viewerEntryUrl({ port: currentPort() }, result.entry.id);
+        if (opts.open && !global.json) openBrowser(url);
+        emit(global.json, { ...result, url }, () => {
+          const what = result.deduped ? "unchanged" : `rev ${result.entry.rev}`;
+          human(`✓ ${result.entry.title} (${what})`);
+          human(`  ${url}`);
+        });
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  program
+    .command("feed")
+    .description("List submitted artifacts, newest first")
+    .option("--project <projectId>", "only this project")
+    .option("--tag <tag>", "only this tag")
+    .option("--limit <n>", "maximum entries (default 30)")
+    .option("--all-revisions", "include superseded revisions")
+    .action((opts: Record<string, string | boolean>) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const page = queryFeed({
+          projectId: typeof opts.project === "string" ? opts.project : undefined,
+          tag: typeof opts.tag === "string" ? opts.tag : undefined,
+          limit: positiveInt(typeof opts.limit === "string" ? opts.limit : undefined, "--limit"),
+          allRevisions: !!opts.allRevisions,
+        });
+        emit(global.json, page, () => {
+          if (!page.entries.length) {
+            human("(no artifacts submitted yet)");
+            human("Submit one with: artifacts submit <path>");
+            return;
+          }
+          for (const entry of page.entries) human(fmtEntry(entry));
+          human(`  — ${page.entries.length} of ${page.total}`);
+        });
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  program
+    .command("import")
+    .description("Submit everything already in this project's .agentuse/artifacts directory")
+    .argument("[dir]", "project directory", ".")
+    .action(async (dir: string) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const results = await importLocalArtifacts(dir);
+        const added = results.filter((r) => !r.deduped).length;
+        emit(global.json, { imported: results.length, added, results }, () => {
+          human(`✓ imported ${results.length} artifact(s), ${added} new`);
+          for (const r of results) human(fmtEntry(r.entry));
+        });
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  program
+    .command("prune")
+    .description("Delete superseded revisions from the store, keeping the newest few")
+    .option("--keep <n>", "revisions to keep per artifact (default 5)")
+    .action(async (opts: Record<string, string>) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const keep = positiveInt(opts.keep, "--keep") ?? 5;
+        const out = await pruneStore(keep);
+        emit(global.json, out, () =>
+          human(`✓ removed ${out.removed.length} revision(s), freed ${fmtSize(out.freedBytes)}`),
+        );
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
 
   program
     .command("init")
@@ -127,7 +197,7 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .command("open")
-    .description("Register current project, ensure the viewer is running, and print/open its URL")
+    .description("Register current project, ensure the viewer is running, and print/open its feed URL")
     .option("--port <n>", `preferred port when starting the server (default ${DEFAULT_PORT})`)
     .option("--detach", "run server in background when starting it")
     .option("--no-browser", "do not open the browser")
@@ -140,7 +210,7 @@ export async function runCli(argv: string[]): Promise<void> {
           preferredPort: opts.port ? parseInt(String(opts.port), 10) : DEFAULT_PORT,
           detach: !!opts.detach,
         });
-        const url = `http://127.0.0.1:${status.port}/p/${encodeURIComponent(project.projectId)}`;
+        const url = viewerFeedUrl({ port: status.port }, { projectId: project.projectId });
         if (opts.browser !== false && !global.json) openBrowser(url);
         emit(global.json, { project, server: status, url }, () => human(`viewer: ${url}`));
       } catch (e) {
@@ -149,72 +219,15 @@ export async function runCli(argv: string[]): Promise<void> {
     });
 
   program
-    .command("list")
-    .description("List supported artifacts discovered in the current project")
-    .action(() => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        const out = listLocalArtifactsForCurrentProject();
-        emit(
-          global.json,
-          {
-            project: out.project,
-            artifactsDir: out.artifactsDir,
-            artifacts: out.artifacts.map((a) => ({
-              artifactId: a.artifactId,
-              name: a.record.name,
-              type: a.record.type,
-              entry: a.entry,
-              projectRelPath: a.projectRelPath,
-              size: a.record.size,
-            })),
-          },
-          () => {
-            if (!out.artifacts.length) {
-              human(`No supported artifacts found in ${out.project.path}`);
-              human("Supported files include markdown, AgentUse, HTML, images, and PDFs.");
-              return;
-            }
-            human(`Artifacts in ${out.project.name}:`);
-            for (const a of out.artifacts) {
-              human(`  ${a.record.name}  ${a.record.type}  ${fmtSize(a.record.size)}  ${a.projectRelPath}`);
-            }
-          },
-        );
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  program
     .command("url")
-    .description(
-      "Print viewer URL: project home by default, or a deep link to an artifact. " +
-        "The target may be a file path (resolved to its project-relative name) or a literal artifact name.",
-    )
-    .argument("[target]", "artifact file path or name")
-    .option("--full", "deep link that opens the artifact in fullscreen on load")
-    .action((target: string | undefined, opts: { full?: boolean }) => {
+    .description("Print the viewer feed URL, filtered to the current project")
+    .option("--all", "link to the unfiltered feed")
+    .action((opts: { all?: boolean }) => {
       const global = program.opts<GlobalOpts>();
       try {
-        const port = isServerRunning()?.port ?? DEFAULT_PORT;
-        if (!target) {
-          const project = resolveProject();
-          const url = viewerProjectUrl({ port }, project.projectId);
-          emit(global.json, { url }, () => human(url));
-          return;
-        }
-        // A skill knows the path it wrote, not the artifact's internal name.
-        // If the target points at a real file, resolve the project from that
-        // file's location and use its project-relative path as the stable
-        // artifact name. Otherwise treat the target as a literal name.
-        const resolved = resolveArtifactName(target);
-        const url = viewerArtifactUrl({ port }, resolved.projectId, resolved.name, {
-          full: !!opts.full,
-        });
-        emit(global.json, { url, projectId: resolved.projectId, name: resolved.name }, () =>
-          human(url),
-        );
+        const projectId = opts.all ? undefined : resolveProject().projectId;
+        const url = viewerFeedUrl({ port: currentPort() }, { projectId });
+        emit(global.json, { url, projectId }, () => human(url));
       } catch (e) {
         fail(global.json, e);
       }
@@ -277,13 +290,19 @@ export async function runCli(argv: string[]): Promise<void> {
 
   project
     .command("forget")
-    .description("Remove a project from the registry without deleting files")
+    .description("Remove a project from the registry and drop its submitted artifacts")
     .argument("<projectIdOrPath>")
-    .action(async (ref: string) => {
+    .option("--keep-artifacts", "leave the project's feed entries and stored bundles in place")
+    .action(async (ref: string, opts: { keepArtifacts?: boolean }) => {
       const global = program.opts<GlobalOpts>();
       try {
         const out = await forgetProject(ref);
-        emit(global.json, out, () => human(`✓ forgot ${out.project.name} (${out.projectId})`));
+        const droppedArtifacts = opts.keepArtifacts
+          ? 0
+          : await forgetProjectArtifacts(out.projectId);
+        emit(global.json, { ...out, droppedArtifacts }, () =>
+          human(`✓ forgot ${out.project.name} (${out.projectId}), dropped ${droppedArtifacts} artifact(s)`),
+        );
       } catch (e) {
         fail(global.json, e);
       }
@@ -327,14 +346,14 @@ export async function runCli(argv: string[]): Promise<void> {
               `server already running (pid ${existing.pid}, port ${existing.port})`,
             );
           }
-          const url = `http://127.0.0.1:${existing.port}/`;
+          const url = viewerFeedUrl({ port: existing.port });
           emit(global.json, { ...existing, url }, () => human(`already running: ${url}`));
           return;
         }
         const preferredPort = opts.port ? parseInt(String(opts.port), 10) : DEFAULT_PORT;
         const detach = !!opts.detach;
         const out = await startServer({ preferredPort, detach });
-        const url = `http://127.0.0.1:${out.port}/`;
+        const url = viewerFeedUrl({ port: out.port });
         emit(global.json, { ...out, url }, () => human(`viewer: ${url}`));
       } catch (e) {
         fail(global.json, e);

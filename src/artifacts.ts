@@ -1,26 +1,21 @@
-// Viewer URL helpers. The artifact store itself lives in each project's
-// registered project and are scanned on demand by `src/localArtifacts.ts`;
-// `./.agentuse/artifacts/` remains the recommended generated-output drop
-// zone. The CLI no longer ingests blobs into a central manifest store.
+// Viewer URL helpers. Artifacts are submitted into the store and listed by the
+// feed log; the viewer is a feed at `/` plus a detail page per entry.
 
 export interface ViewerLocation {
   port: number;
 }
 
-export function viewerProjectUrl(loc: ViewerLocation, projectId: string): string {
-  return `http://127.0.0.1:${loc.port}/p/${projectId}`;
+export function viewerFeedUrl(
+  loc: ViewerLocation,
+  filter: { projectId?: string; tag?: string } = {},
+): string {
+  const params = new URLSearchParams();
+  if (filter.projectId) params.set("project", filter.projectId);
+  if (filter.tag) params.set("tag", filter.tag);
+  const query = params.toString();
+  return `http://127.0.0.1:${loc.port}/${query ? `?${query}` : ""}`;
 }
 
-export function viewerArtifactUrl(
-  loc: ViewerLocation,
-  projectId: string,
-  name: string,
-  opts: { full?: boolean } = {},
-): string {
-  // `name` is the artifact's stable name (its project-relative path for
-  // discovered project files), so this link survives content edits — unlike
-  // the content-hash `/f/:id` form. `?full=1` tells the viewer to open the
-  // single matching artifact in fullscreen on load.
-  const base = `http://127.0.0.1:${loc.port}/p/${projectId}/a/${encodeURIComponent(name)}`;
-  return opts.full ? `${base}?full=1` : base;
+export function viewerEntryUrl(loc: ViewerLocation, entryId: string): string {
+  return `http://127.0.0.1:${loc.port}/a/${encodeURIComponent(entryId)}`;
 }

@@ -4,15 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`@agentuse/artifacts`: a Node CLI plus a local web viewer for collecting markdown/HTML artifacts emitted by AI agents. The recommended generated-output drop zone is each project's `./.agentuse/artifacts/` directory, but the viewer discovers supported artifact files across registered projects. The CLI registers project paths in a small index at `~/.agentuse/artifacts/manifest.json` and serves the registered projects through a local React SPA.
+`@agentuse/artifacts`: a Node CLI plus a local web viewer for artifacts emitted by AI agents. Agents call `artifacts submit <path>`; the CLI copies that file (or directory bundle) into a central store and appends one line to an append-only feed log. The viewer is a mobile-first React SPA showing that feed newest-first, filterable by project and tag.
+
+**Submit, not discovery.** Before 0.4.0 the viewer scanned registered projects for supported files. That is gone: nothing reaches the feed unless it was submitted. Don't reintroduce a scanner, it made "what's new" unanswerable (mtime lies) and cost a full filesystem walk per manifest poll.
 
 ## Commands
 
-- `npm run dev -- <args>` runs the CLI via `tsx` against `src/bin.ts`. Example: `npm run dev -- list`.
+- `npm run dev -- <args>` runs the CLI via `tsx` against `src/bin.ts`. Example: `npm run dev -- feed`.
 - `npm run build` builds the viewer first (`viewer/` -> `viewer-dist/`) then compiles the CLI (`src/` -> `dist/`). The viewer must exist before `serve` will start.
 - `npm run build:cli` and `npm run build:viewer` run the two halves independently. Touching only `src/` -> rebuild CLI; touching only `viewer/src/` -> rebuild viewer.
 - `npm run watch` runs both watchers in one shell: `tsx watch` for the server (auto-restart on `src/` changes) and `vite build --watch` for the viewer (incremental rebuild into `viewer-dist/`). Stop any detached server first (`npm run dev -- serve --stop`); otherwise the watcher's server falls back to port 7879 silently. Refresh the browser to pick up viewer rebuilds.
-- `npm run dev:viewer` runs the Vite dev server with HMR (port 5173) — `/api/*` is proxied to `127.0.0.1:7878`, so a separate server (`npm run dev:server` or a detached `serve`) must be running. Use this for fast iteration on `viewer/src/`; use `npm run watch` when you also need the production-build output in `viewer-dist/`.
+- `npm run dev:viewer` runs the Vite dev server with HMR (port 5173), `/api/*` is proxied to `127.0.0.1:7878`, so a separate server (`npm run dev:server` or a detached `serve`) must be running. Use this for fast iteration on `viewer/src/`; use `npm run watch` when you also need the production-build output in `viewer-dist/`.
 - `npm run typecheck` does a no-emit `tsc` over `src/` only. The viewer has its own `tsconfig.json` and is typechecked as part of `build:viewer`.
 - `npm test` runs vitest once. `npm run test:watch` for watch mode. Run a single file: `npx vitest run tests/manifest.test.ts`. Run a single test: `npx vitest run -t "name fragment"`. Tests use `pool: forks` with `singleFork: true` because they touch a shared on-disk store.
 - Tests must isolate state by setting `AGENTUSE_ARTIFACTS_HOME` to a temp dir (see `tests/helpers.ts`). Otherwise they will read/write the user's real `~/.agentuse/artifacts/`.
@@ -25,15 +27,40 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `viewer/` = a separate Vite + React 18 SPA with its own `package.json` and `node_modules`. It builds into `viewer-dist/` at the repo root (note: `--outDir ../viewer-dist`), which is what gets shipped in the npm package alongside `dist/`.
 - Both `dist/` and `viewer-dist/` are gitignored but listed under `package.json#files` for publish.
 
-### Storage layout (filesystem is the source of truth)
+### Storage layout
 
-Two layers, both filesystem-backed:
+Everything lives under `rootDir()` (default `~/.agentuse/artifacts/`, overridable via `AGENTUSE_ARTIFACTS_HOME`):
 
-1. **Per-project artifacts** are supported files in each registered project (`.md/.markdown`, `.html/.htm`, `.png/.jpg/.jpeg/.webp`, `.pdf`). Generated agent output should still live at `<project>/.agentuse/artifacts/<name>/index.{md,html}` (with sibling support files), but existing project docs/screenshots/reports are discovered in place. Dependency, build, cache, temp, VCS, and hidden config directories are ignored, except `.agentuse/artifacts/`.
-2. **Cross-project index** lives under `rootDir()` (default `~/.agentuse/artifacts/`, overridable via `AGENTUSE_ARTIFACTS_HOME`):
-   - `manifest.json` - the project registry: `projects: Record<projectId, { name, path, createdAt, updatedAt? }>`. Schema versioned (`SCHEMA_VERSION = 1`). The runtime `Manifest` type still carries `runs`/`artifacts`/`latest` because `buildLocalManifest()` populates them on every `/api/manifest` response from the on-disk scan; only `projects` is persisted.
-   - `.lock` - advisory lock file for cross-process registry writes.
-   - `.serve.pid` - JSON record of the running viewer server (pid + port + startedAt).
+- `feed.jsonl`, the append-only submission log. One `FeedEntry` per line, oldest first. This is the source of truth for what exists.
+- `store/<projectId>/<slug>/<rev>/…`, the copied bundles. Immutable once written; a re-submit writes a new `<rev>`.
+- `manifest.json`, the project registry only: `projects: Record<projectId, { name, path, createdAt, updatedAt? }>`. `SCHEMA_VERSION = 1`.
+- `preview-cache/`, generated WebP thumbnails, keyed by entry id + contentHash + width.
+- `.lock`, advisory lock for registry and feed-rewrite operations.
+- `.serve.pid`, JSON record of the running viewer server (pid + port + startedAt).
+
+**Why the store copies instead of pointing at the project file.** Three reasons, all load-bearing:
+1. A feed entry is a snapshot of a moment. Pointing at a mutable file makes the feed lie about what was submitted.
+2. Agent output lives in gitignored scratch dirs. A branch switch, `git clean`, or a deleted worktree would 404 half the feed.
+3. Revisions come free, the old bundle is still on disk under its own `<rev>`.
+
+The cost is disk. `pruneStore()` (CLI: `artifacts prune`) keeps the newest N revisions per slug and deletes the rest, from both the log and disk.
+
+### Feed log semantics (`src/feed.ts`)
+
+- **Appends do not take the lock.** A single `O_APPEND` write under the pipe-buffer size is atomic, so concurrent agents can submit without contending. `appendFeedEntry()` rejects lines over 8KB to keep that guarantee. Only `writeFeedAtomic()` (prune / forget) needs `withLock`.
+- **Readers fold the log.** `queryFeed()` keeps the newest `rev` per `(projectId, slug)` unless `allRevisions` is set. Facet counts (`projects`, `tags`) are computed over the whole deduped set, *before* the project/tag filter, so the viewer's chips don't vanish as you filter.
+- **Malformed lines are skipped, not fatal.** A hand-edited log should degrade, not brick the viewer.
+- `readFeedEntries()` caches on `feedStamp()` (`path:mtimeMs:size`). The path is in the stamp because `AGENTUSE_ARTIFACTS_HOME` changes within a process in tests.
+- Pagination is an integer offset into the sorted, filtered list. Fine because the whole log is read anyway; revisit only if a log gets large enough that parsing it dominates.
+
+### Bundle semantics (`src/store.ts`)
+
+- `submitArtifact()` takes a file or a directory. A directory's entry file is the first of `index.html/htm/md/markdown/agentuse`; failing that, the single renderable file; failing that it throws rather than guessing.
+- Support files (css, svg, ico, json, fonts, gif) are copied alongside renderable types so relative URLs resolve. `node_modules`, `.git`, `dist`, `build`, `coverage`, `__pycache__`, dotfiles, and symlinks are skipped.
+- Caps are checked **during the walk, before any copy**: `MAX_BUNDLE_FILES` (200) and `MAX_BUNDLE_BYTES` (25MB). A too-large bundle fails loudly and leaves nothing behind.
+- The copy goes to a `.tmp.<pid>` sibling and is renamed into place, so a crash mid-copy can't leave a half-written bundle behind a feed line that points at it.
+- **Dedupe requires content *and* metadata to match.** Same `contentHash` + same title + same tags → return the existing entry, `deduped: true`, no new line. A changed title or tag is a real edit and becomes a revision. This is what keeps agent re-runs from spamming the feed while still letting a re-tag land.
+- `deriveTitle()` precedence: `--title`, frontmatter `title:`, first `#` heading (fenced code blocks skipped, READMEs are full of `# comment` lines), HTML `<title>` then `<h1>`, humanized slug.
 
 ### Registry concurrency
 
@@ -44,7 +71,7 @@ Project-registry mutations go through `withLock()` in `src/manifest.ts`:
 4. SIGINT/SIGTERM release the lock before exit.
 5. Writes use a `tmp` + `rename` pattern with `fsync`.
 
-Reads outside `withLock` are tolerated (writes are atomic). The only writers today are `init`, `open`, and `project add/forget/prune` — adding/editing artifact files themselves does not touch the lock.
+Reads outside `withLock` are tolerated (writes are atomic). Writers: `init`, `open`, `submit` (it registers the project), `project add/forget/prune`, plus `pruneStore()` and `forgetProjectArtifacts()` which rewrite `feed.jsonl` wholesale. Appending to the feed deliberately does **not** take the lock, see "Feed log semantics".
 
 ### Project identity
 
@@ -54,25 +81,26 @@ Reads outside `withLock` are tolerated (writes are atomic). The only writers tod
 
 This is why moving a project directory keeps its artifacts; rewriting git history (changing the root commit) creates a new project.
 
-### Listing semantics (`src/localArtifacts.ts`)
+Note the ordering consequence: `submit` derives the project from the **target's** directory (or `opts.cwd`), not the process cwd, so submitting a path in another repo files the artifact under that repo.
 
-`listLocalArtifactsForProject()` now merges two scans:
-- First, it walks each registered project's `.agentuse/artifacts/` directory with legacy semantics: a subdirectory containing `index.html` or `index.md` becomes one artifact named `<dir>`, sibling `.html`/`.md` files become `<dir>/<file>`, and IDs keep using the artifact-root-relative entry so old URLs remain stable.
-- Then it recursively scans the registered project for supported artifact files, skipping dependency/build/cache/temp/VCS/hidden config paths. Project-wide files use `projectRelPath` for serving and IDs are namespaced with `project:` to avoid collisions.
-- `ArtifactRecord.localEntry` remains artifact-root-relative and only exists for legacy `.agentuse/artifacts/` files. `ArtifactRecord.projectRelPath` is project-root-relative and is available for all discovered project-local files.
-- The synthetic `contentHash` for a legacy directory entry still folds in every sibling's `mtimeMs+size` so the viewer's iframe cache-busts when an asset (image, css) referenced via a relative URL is updated, even though the index file itself hasn't changed.
-- The project-wide scan is a synchronous walk that also reads image headers for every matched image, so a pathological project (e.g. a CMS export with a multi-GB media library) can block the event loop for minutes and hang the viewer. `listProjectFileArtifacts()` is bounded by `settings.maxProjectScanEntries` (default 10k dirents visited; `0` = unlimited). On hitting the cap it stops and logs a one-time-per-process warning naming the project. The artifact-root scan (`.agentuse/artifacts/`) is separate and uncapped, so a capped project still shows its real artifacts. Raise the cap, add an ignore pattern, or disable project-wide discovery for legitimately large projects.
+### Identity of an artifact
+
+- `slug`, the artifact's identity within a project, derived from the path basename unless `--slug` is given. **Same slug = same artifact**, so two unrelated files that reduce to the same slug become revisions of each other. That is the intended trade-off; `--slug` is the escape hatch.
+- `rev`, 1-based ordinal, zero-padded to 4 digits in the store path. Not a hash: hashing a whole directory per lookup is slow and the paths should stay human-readable.
+- `id`, `art_` + `sha16(projectId \0 slug \0 rev)`. Stable, so a deep link keeps working; and because it folds in `rev`, an entry id always names one immutable bundle. That is what lets `/api/store/:id/*` be `immutable`-cacheable.
 
 ### Viewer server (`src/server.ts`)
 
 Routes:
-- `/api/manifest` -> the live manifest JSON (`buildLocalManifest()` scans every registered project on each call).
-- `/api/artifact/:artifactId` -> markdown / image / pdf bytes for the artifact ID. HTML artifacts are rejected here (400); use `/api/render/:id`.
-- `/api/raw/:artifactId` -> original file bytes as `application/octet-stream` with `Content-Disposition: attachment` (powers Download / Copy actions; never rendered inline).
-- `/api/render/:artifactId` -> sanitized HTML as `text/html` with its own `Content-Security-Policy` and `X-Frame-Options: SAMEORIGIN` response headers. The SPA loads this via `<iframe src="/api/render/:id" sandbox="allow-scripts">`. Going through `src=` (not `srcdoc`) is what lets the artifact have its own CSP — srcdoc inherits the parent SPA CSP, `src=` does not.
-- `/api/project-artifacts/:projectId/:path...` -> legacy route serving files inside `<project>/.agentuse/artifacts/` directly so existing HTML artifacts can resolve relative URLs. HTML is sanitized; other types pass through with a type-appropriate CSP.
-- `/api/project-files/:projectId/:path...` -> project-root route for whole-project discovery. It rejects ignored paths and unsupported extensions so the viewer does not become a general-purpose source/config file server. HTML is sanitized; safe support files such as CSS/images/fonts pass through with type-appropriate headers.
-- Everything else falls back to `viewer-dist/index.html` for SPA routes (`/p/:projectId`, `/p/:projectId/a/:name`, `/p/:projectId/a/:name/f/:expandedId`, etc.).
+- `GET /api/feed?project&tag&q&limit&cursor` -> a `FeedPage`: entries, `nextCursor`, `total`, and the project/tag facets. ETag is `sha(feedStamp + query)`, so the viewer's 5s poll is a conditional request that normally 304s.
+- `GET /api/entry/:id` -> `{ entry, revisions }` for the detail page.
+- `GET /api/store/:entryId/:path...` -> one file out of the stored bundle. An empty path serves the entry file. HTML is sanitized on every read; other types get a type-appropriate CSP. `cache-control: immutable` is safe here **only** because an entry id names one immutable revision.
+- `GET /api/preview/:entryId?w=` -> cached WebP thumbnail for image entries. 400 for non-images.
+- `GET /api/raw/:entryId` -> the entry file exactly as submitted, `application/octet-stream` + `Content-Disposition: attachment` (powers Download / Copy content; never rendered inline).
+- `GET/POST /api/projects`, `POST /api/projects/prune`, `DELETE /api/projects/:id` -> the registry. The DELETE also drops that project's feed entries and stored bundles.
+- Everything else falls back to `viewer-dist/index.html` for SPA routes (`/`, `/a/:entryId`).
+
+There is no `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, or `/api/settings` any more. They belonged to the scanner.
 
 Server lifecycle:
 - `serve` writes `.serve.pid`. `serve --detach` re-spawns `dist/bin.js serve --port N` with `detached: true` and `stdio: "ignore"`, then polls `.serve.pid` for up to 5s. `serve --stop` SIGTERMs and cleans up.
@@ -84,11 +112,13 @@ Server lifecycle:
 `src/sanitize.ts` is the trust boundary for ingested HTML artifacts. It runs at **serve time**, not ingest time, so changes to the sanitizer take effect for already-stored artifacts. Two layers:
 
 1. `scrubHtml()` parses with `node-html-parser` (no regex on tags) and removes: `<base>`, `<meta http-equiv="refresh">`, `<link rel>` with `preload|prefetch|dns-prefetch|preconnect|modulepreload`.
-2. `buildSafeSrcdoc()` injects `META_CSP` as a `<meta http-equiv="Content-Security-Policy">` as the first child of `<head>` (creating one if missing). The same policy is also sent as a response header from `/api/render/:id` — the meta tag is defense in depth (survives if the file is saved or opened directly).
+2. `buildSafeSrcdoc()` injects `META_CSP` as a `<meta http-equiv="Content-Security-Policy">` as the first child of `<head>` (creating one if missing). The same policy is also sent as a response header from `/api/store/:id/…`, the meta tag is defense in depth (survives if the file is saved or opened directly).
 
-**Threat model:** the agent producing artifacts is developer-controlled, but its inputs (web pages, PRs, docs) aren't. The realistic risk is prompt-injection routing through the agent into artifact markup. So `META_CSP` permits external `https:` for script/style/font/img (designs use Tailwind Play CDN, Google Fonts) but locks `connect-src 'none'` to deny `fetch`/`XHR`/`WebSocket` — kills exfil + LAN scan. `frame-src 'none'`, `object-src 'none'`, `base-uri 'none'` close the rest.
+**Threat model:** the agent producing artifacts is developer-controlled, but its inputs (web pages, PRs, docs) aren't. The realistic risk is prompt-injection routing through the agent into artifact markup. So `META_CSP` permits external `https:` for script/style/font/img (designs use Tailwind Play CDN, Google Fonts) but locks `connect-src 'none'` to deny `fetch`/`XHR`/`WebSocket`, kills exfil + LAN scan. `frame-src 'none'`, `object-src 'none'`, `base-uri 'none'` close the rest.
 
-**Origin isolation comes from the iframe, not the CSP.** `viewer/src/components/Tile.tsx` sets `sandbox="allow-scripts"` *without* `allow-same-origin`, so the iframe lives in an opaque origin. Scripts in the artifact cannot read the parent viewer DOM, localStorage, or cookies regardless of what the CSP allows. Do not add `allow-same-origin` to the sandbox attribute — it would defeat the isolation and the threat model assumes scripts run.
+**Origin isolation comes from the iframe, not the CSP.** `viewer/src/components/Render.tsx` sets `sandbox="allow-scripts"` on the detail view *without* `allow-same-origin`, so the iframe lives in an opaque origin. Scripts in the artifact cannot read the parent viewer DOM, localStorage, or cookies regardless of what the CSP allows. Do not add `allow-same-origin` to the sandbox attribute, it would defeat the isolation and the threat model assumes scripts run. Feed card thumbnails go further with a bare `sandbox=""` (no scripts at all), a preview should never execute anything, and a feed can show dozens at once.
+
+Path containment for `/api/store/:id/*` lives in `resolveBundleFile()`: it decodes once, normalizes backslashes, rejects `..`/`.`/empty segments, then re-checks that the resolved absolute path is still under the bundle root. Bundles contain no symlinks because `collectBundleFiles()` skips them at copy time.
 
 `SPA_CSP` (the viewer SPA's own CSP) is independent because the artifact is loaded via `src=`, not `srcdoc`. No inheritance. Keep `SPA_CSP` tight.
 
@@ -102,15 +132,18 @@ When modifying sanitization: do not switch to regex; do not relax `connect-src` 
 
 ### Viewer SPA (`viewer/src/`)
 
-- React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `navRoute` over `window.location` in `App.tsx`. Path shape: `/p/:projectId[/a/:name[/v/:rev]][/f/:expandedId]?d=1`. The `r/:runId` and `v/:rev` segments still parse for backward-compat with bookmarked URLs, but local-fs artifacts always have one revision and no run tag. The `/a/:name` segment isolates a single artifact by its stable `name` (the project-relative path for discovered files), bypassing group filtering. Query flags: `?d=1` opens the metadata drawer, `?panes=0` hides the side panes, and `?full=1` auto-expands the single `/a/:name` match to fullscreen on load. `?full=1` is one-shot per `artifactName` (guarded by a `useRef`) so pressing Escape collapses without the 2s manifest poll re-expanding it. The `url --full` CLI command composes these links; prefer them over hand-built `/g/.../f/:id` URLs because they are keyed on the path, not the content hash.
-- Manifest is polled every 2s from `/api/manifest`. There is no websocket or SSE.
-- HTML artifacts render via `<iframe src="/api/render/:id" sandbox="allow-scripts">` for ID-based fallback, or through project-local file routes when a project-relative path is available. Markdown is fetched from the corresponding local file route or `/api/artifact/:id`; leading YAML-style frontmatter is parsed client-side into a metadata panel, then the remaining body is rendered with `react-markdown` + `remark-gfm` + `remark-breaks` + `rehype-highlight`. `remark-breaks` makes single newlines render as `<br>` (GitHub-comment style) because agent-emitted markdown often uses single newlines between lines instead of blank-line paragraph breaks.
-- `react-zoom-pan-pinch` powers the canvas pan/zoom. If you touch gestures here, mind the conflict between iframe scrolling and the parent pan handler.
+- React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `routePath` over `window.location` in `App.tsx`. Two routes only: `/` (feed) and `/a/:entryId` (detail). Filter state lives in the query string (`?project=&tag=&q=`) so a filtered feed is linkable and survives reload.
+- Files: `App.tsx` (routing + polling + pagination), `components/Feed.tsx` (header, chips, cards), `components/Detail.tsx` (header, actions, revisions), `components/Render.tsx` (all artifact bodies and card previews), `components/ProjectsSheet.tsx`, `components/RelativeTime.tsx`, `frontmatter.ts`.
+- The feed polls `/api/feed` every 5s with an `if-none-match`; a 304 costs one request and no re-render. When the log *does* change, pagination resets to page one, new artifacts belong at the top, and splicing them into a scrolled list reads as a jump.
+- **Card previews are lazy and mount once.** `useSeen` (IntersectionObserver, 400px rootMargin) gates them, and the flag never flips back, so scrolling away doesn't tear down a rendered preview. Without this a long feed mounts one iframe per HTML card at once. Note when screenshotting: `Page.captureScreenshot` with `captureBeyondViewport` does not paint off-screen iframes, so a blank card in a full-page capture is usually the capture, not a bug, scroll it into the viewport and take a normal shot.
+- Card layout differs by type: images and HTML get a thumbnail above the title; markdown gets a three-line text excerpt below it (a title under three lines of prose reads backwards).
+- Markdown is fetched from the bundle route; leading YAML-style frontmatter is parsed client-side into a metadata panel, then the body renders with `react-markdown` + `remark-gfm` + `remark-breaks` + `rehype-highlight`. `remark-breaks` makes single newlines render as `<br>` (GitHub-comment style) because agent-emitted markdown often uses single newlines instead of blank-line paragraph breaks. Relative image `src`s are rewritten against the entry file's directory inside the bundle.
+- Mobile is the primary target: single column, 44px minimum touch targets, 16px inputs (smaller makes iOS Safari zoom on focus), safe-area insets, and pinch-zoom left enabled in `index.html` (the old pan/zoom canvas is why it used to be disabled).
 
 ## Conventions specific to this repo
 
-- TypeScript: `strict` + `noUncheckedIndexedAccess`. Indexed access into `manifest.artifacts[id]` returns `T | undefined`; respect this rather than `!`-asserting blindly. `latest[projectId]` is the same.
+- TypeScript: `strict` + `noUncheckedIndexedAccess`. Indexed access into `manifest.projects[id]` returns `T | undefined`; respect this rather than `!`-asserting blindly.
 - ESM throughout. Imports use `.js` extensions even for `.ts` source (NodeNext-style for `Bundler` resolution).
 - Never call `process.exit` outside `cli.ts`'s `fail()` / commander callbacks. Library code throws `CliError`.
-- Registry writes go `tmp + fsync + rename` through `writeManifestAtomic`. Artifact files themselves are owned by the user/agent and the CLI does not write to them.
+- Registry and feed rewrites go `tmp + fsync + rename` through `writeManifestAtomic` / `writeFeedAtomic`. Bundle copies use the same pattern at directory level. The CLI never writes to the user's own project files, it only reads them at submit time.
 - When adding a CLI flag, also add a JSON-output shape to the corresponding `emit()` call so `--json` consumers see it.
