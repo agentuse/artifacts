@@ -7,7 +7,7 @@ description: Submit substantial deliverables to the @agentuse/artifacts feed so 
 
 `@agentuse/artifacts` is a feed of things agents made. You write files as usual, then **submit** them. Submitting copies the files into a central store and adds one entry to a reverse-chronological feed the user browses at `http://127.0.0.1:7878/`.
 
-Submitting is the only way an artifact reaches the feed. Writing a file into `.agentuse/artifacts/` no longer publishes it on its own.
+Submitting is the only way an artifact reaches the feed. Writing a file into `./.agentuse/artifacts/` no longer publishes it on its own. (Do not confuse that project-local folder with `~/.agentuse/artifacts/`, the global store the tool manages.)
 
 ## When to use this
 
@@ -31,12 +31,12 @@ Inside the package checkout, use `npm run dev -- <command>`. Most commands accep
 
 ## Standard workflow
 
-1. **Write the file(s).** Anywhere works, `submit` copies from wherever the file is. `./.agentuse/artifacts/<name>/` is the usual scratch spot for generated output; create it yourself if it is missing. A single file is fine too.
+1. **Write the file(s).** Anywhere the project already keeps generated output, `tmp/` for example. `submit` copies from wherever the file is, so nothing needs a special folder. A single file is fine too.
 
 2. **Submit it.**
 
    ```bash
-   npx @agentuse/artifacts submit .agentuse/artifacts/q2-market-analysis --tag research --tag q2
+   npx @agentuse/artifacts submit tmp/q2-market-analysis --tag research --tag q2
    ```
 
    `submit` prints the artifact's URL. There is no setup step.
@@ -55,7 +55,7 @@ Inside the package checkout, use `npm run dev -- <command>`. Most commands accep
 - **A single file is a one-file artifact.** `report.md`, `chart.png`, `deck.pdf`.
 
 ```txt
-.agentuse/artifacts/customer-report/
+tmp/customer-report/
   index.html        <- entry file
   style.css
   chart.png
@@ -79,7 +79,7 @@ Re-submitting byte-identical content with the same title and tags is a no-op, it
 | --- | --- |
 | `submit <path> [--title T] [--tag T...] [--slug S] [--open]` | Copy a file or directory into the store and add it to the feed. Prints the URL. |
 | `feed [--project ID] [--tag T] [--limit N] [--all-revisions]` | List submitted artifacts, newest first. |
-| `import [dir]` | One-shot migration: submit everything already in `<dir>/.agentuse/artifacts/`. |
+| `import [dir]` | One-shot migration: submit everything already in the project-local `<dir>/.agentuse/artifacts/`. |
 | `prune [--keep N]` | Delete superseded revisions from the store (default: keep 5 per artifact). |
 | `open [--port N] [--detach] [--no-browser]` | Ensure the viewer is running, open the feed filtered to this project. |
 | `url [--all]` | Print the feed URL, filtered to the current project unless `--all`. |
@@ -108,8 +108,8 @@ Avoid: `report`, `notes`, `final`, `artifact`.
 ### An HTML artifact with support files
 
 ```bash
-mkdir -p .agentuse/artifacts/customer-report
-cat > .agentuse/artifacts/customer-report/index.html <<'EOF'
+mkdir -p tmp/customer-report
+cat > tmp/customer-report/index.html <<'EOF'
 <!doctype html>
 <html>
 <head>
@@ -122,20 +122,20 @@ cat > .agentuse/artifacts/customer-report/index.html <<'EOF'
 </body>
 </html>
 EOF
-cat > .agentuse/artifacts/customer-report/style.css <<'EOF'
+cat > tmp/customer-report/style.css <<'EOF'
 body { font-family: system-ui; padding: 32px; }
 EOF
-npx @agentuse/artifacts submit .agentuse/artifacts/customer-report --tag client-acme
+npx @agentuse/artifacts submit tmp/customer-report --tag client-acme
 ```
 
 ### A standalone markdown report
 
 ```bash
-cat > .agentuse/artifacts/q2-market-analysis.md <<'EOF'
+cat > tmp/q2-market-analysis.md <<'EOF'
 # Q2 market analysis
 ...
 EOF
-npx @agentuse/artifacts submit .agentuse/artifacts/q2-market-analysis.md --tag research
+npx @agentuse/artifacts submit tmp/q2-market-analysis.md --tag research
 ```
 
 ### An existing project file

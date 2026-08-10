@@ -67,7 +67,7 @@ render this plan as a viewable HTML artifact
 The agent writes the file, then submits it:
 
 ```bash
-npx @agentuse/artifacts submit .agentuse/artifacts/customer-report --tag client-acme
+npx @agentuse/artifacts submit tmp/customer-report --tag client-acme
 ```
 
 A directory is submitted as one bundle: `index.html` plus its CSS, images, and fonts, so relative paths keep working. A single file works too. `submit` prints the artifact's URL.
@@ -106,7 +106,7 @@ Every re-submit writes a new revision, so the store grows. `artifacts prune` kee
 
 ### Migrating from 0.3.x
 
-Artifacts that lived in `.agentuse/artifacts/` are no longer discovered automatically. Publish them once per project:
+Artifacts that lived in a project-local `.agentuse/artifacts/` folder are no longer discovered automatically. Publish them once per project:
 
 ```bash
 npx @agentuse/artifacts import
@@ -120,7 +120,7 @@ Every command supports `--json`.
 | --- | --- |
 | `artifacts submit <path> [--title T] [--tag T...] [--slug S] [--open]` | Copy a file or directory into the store and add it to the feed. Prints the URL. |
 | `artifacts feed [--project ID] [--tag T] [--limit N] [--all-revisions]` | List submitted artifacts, newest first. |
-| `artifacts import [dir]` | Submit everything already in `<dir>/.agentuse/artifacts/`. |
+| `artifacts import [dir]` | Submit everything already in the project-local `<dir>/.agentuse/artifacts/`. |
 | `artifacts prune [--keep N]` | Delete superseded revisions from the store (default: keep 5). |
 | `artifacts open [--port N] [--detach] [--no-browser]` | Start or reuse the viewer and open this project's feed. |
 | `artifacts url [--all]` | Print the feed URL, filtered to the current project unless `--all`. |
