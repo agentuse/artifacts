@@ -7,6 +7,7 @@ import { storeDir } from "../src/paths";
 import {
   MAX_BUNDLE_FILES,
   bundleDir,
+  forgetProjectArtifacts,
   importLocalArtifacts,
   makeSlug,
   pruneStore,
@@ -233,6 +234,34 @@ describe("pruneStore", () => {
     expect(readFeedEntries().map((e) => e.rev).sort()).toEqual([3, 4]);
     expect(fs.existsSync(bundleDir(entries[0]!))).toBe(false);
     expect(fs.existsSync(bundleDir(entries[3]!))).toBe(true);
+  });
+});
+
+describe("forgetProjectArtifacts", () => {
+  let root: string;
+  let project: string;
+  beforeEach(() => {
+    root = tempStorageRoot();
+    project = tempProjectDir();
+  });
+  afterEach(() => {
+    rmStorageRoot(root);
+    fs.rmSync(project, { recursive: true, force: true });
+  });
+
+  it("drops the project's feed lines and its stored bundles", async () => {
+    const { entry } = await submitArtifact({ target: write(project, "report.md", "# Hi") });
+    await submitArtifact({ target: write(project, "notes.md", "# Notes") });
+    expect(readFeedEntries()).toHaveLength(2);
+
+    const dropped = await forgetProjectArtifacts(entry.projectId);
+    expect(dropped).toBe(2);
+    expect(readFeedEntries()).toHaveLength(0);
+    expect(fs.existsSync(path.join(storeDir(), entry.projectId))).toBe(false);
+  });
+
+  it("rejects a project id that has no artifacts", async () => {
+    await expect(forgetProjectArtifacts("proj_nothing")).rejects.toThrow(/no artifacts/i);
   });
 });
 

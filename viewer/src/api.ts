@@ -1,4 +1,4 @@
-import type { EntryDetail, FeedEntry, FeedPage, ProjectIndex, ProjectInfo } from "./types";
+import type { EntryDetail, FeedEntry, FeedPage } from "./types";
 
 export interface FeedFilter {
   projectId?: string;
@@ -67,30 +67,8 @@ export async function fetchText(url: string): Promise<string> {
   return res.text();
 }
 
-async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json() as Promise<T>;
-}
-
-export async function fetchProjects(): Promise<ProjectIndex> {
-  return jsonRequest<ProjectIndex>("/api/projects", { method: "GET" });
-}
-
-export async function addProject(path: string): Promise<{
-  project: ProjectInfo;
-  artifactsDir: string;
-}> {
-  return jsonRequest("/api/projects", { method: "POST", body: JSON.stringify({ path }) });
-}
-
+/** Delete every artifact submitted from a project, feed lines and bundles. */
 export async function removeProject(projectId: string): Promise<void> {
-  await jsonRequest(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
-}
-
-export async function pruneProjects(): Promise<void> {
-  await jsonRequest("/api/projects/prune", { method: "POST" });
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await res.text());
 }

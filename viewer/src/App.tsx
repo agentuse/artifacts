@@ -44,6 +44,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [notification, setNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const etagRef = useRef<string | null>(null);
 
   const navigate = useCallback((next: Route, replace = false) => {
@@ -98,7 +99,7 @@ export function App() {
       window.clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey]);
+  }, [filterKey, reloadKey]);
 
   const onLoadMore = useCallback(async () => {
     const last = pages[pages.length - 1];
@@ -164,9 +165,16 @@ export function App() {
       />
       <ProjectsSheet
         open={projectsOpen}
+        projects={page?.projects ?? []}
         onClose={() => setProjectsOpen(false)}
-        onChanged={() => {
+        onChanged={(deletedProjectId) => {
+          // Refetch now rather than waiting out the poll, and drop a filter
+          // that no longer matches anything.
           etagRef.current = null;
+          if (route.filter.projectId === deletedProjectId) {
+            navigate({ entryId: undefined, filter: { ...route.filter, projectId: undefined } });
+          }
+          setReloadKey((k) => k + 1);
         }}
         onNotify={(type, text) => setNotification({ type, text })}
       />

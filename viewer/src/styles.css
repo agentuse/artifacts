@@ -102,7 +102,6 @@ button, input { font: inherit; color: inherit; }
 }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.45; cursor: default; border-color: var(--border); color: inherit; }
-.btn.ghost { background: transparent; }
 
 .link-btn {
   border: none;
@@ -472,22 +471,6 @@ button, input { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border);
 }
 .sheet-head h2 { margin: 0; font-size: 17px; font-weight: 650; }
-.sheet-row {
-  display: flex;
-  gap: 8px;
-  padding: 14px 0;
-}
-.sheet-row input {
-  flex: 1;
-  min-width: 0;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  background: var(--pane-bg);
-  font-size: 16px;
-  outline: none;
-}
 .sheet-list { flex: 1; overflow-y: auto; }
 .sheet-item {
   display: flex;
@@ -503,7 +486,6 @@ button, input { font: inherit; color: inherit; }
   white-space: nowrap;
   font-size: 12px;
 }
-.sheet-foot { padding-top: 12px; border-top: 1px solid var(--border); }
 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes sheet-in {

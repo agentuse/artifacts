@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Submit, not discovery.** Before 0.4.0 the viewer scanned registered projects for supported files. That is gone: nothing reaches the feed unless it was submitted. Don't reintroduce a scanner, it made "what's new" unanswerable (mtime lies) and cost a full filesystem walk per manifest poll.
 
+**No project registry either.** Registering a project only ever existed to tell the scanner where to look, so it went with the scanner. `resolveProject()` derives a `projectId` from the git root on the fly, and everything downstream (feed chips, `project list`, the Projects sheet) reads the projects out of the feed entries themselves. Don't add a registry back: an "add project" button that makes nothing appear is worse than no button.
+
 ## Commands
 
 - `npm run dev -- <args>` runs the CLI via `tsx` against `src/bin.ts`. Example: `npm run dev -- feed`.
@@ -16,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run watch` runs both watchers in one shell: `tsx watch` for the server (auto-restart on `src/` changes) and `vite build --watch` for the viewer (incremental rebuild into `viewer-dist/`). Stop any detached server first (`npm run dev -- serve --stop`); otherwise the watcher's server falls back to port 7879 silently. Refresh the browser to pick up viewer rebuilds.
 - `npm run dev:viewer` runs the Vite dev server with HMR (port 5173), `/api/*` is proxied to `127.0.0.1:7878`, so a separate server (`npm run dev:server` or a detached `serve`) must be running. Use this for fast iteration on `viewer/src/`; use `npm run watch` when you also need the production-build output in `viewer-dist/`.
 - `npm run typecheck` does a no-emit `tsc` over `src/` only. The viewer has its own `tsconfig.json` and is typechecked as part of `build:viewer`.
-- `npm test` runs vitest once. `npm run test:watch` for watch mode. Run a single file: `npx vitest run tests/manifest.test.ts`. Run a single test: `npx vitest run -t "name fragment"`. Tests use `pool: forks` with `singleFork: true` because they touch a shared on-disk store.
+- `npm test` runs vitest once. `npm run test:watch` for watch mode. Run a single file: `npx vitest run tests/store.test.ts`. Run a single test: `npx vitest run -t "name fragment"`. Tests use `pool: forks` with `singleFork: true` because they touch a shared on-disk store.
 - Tests must isolate state by setting `AGENTUSE_ARTIFACTS_HOME` to a temp dir (see `tests/helpers.ts`). Otherwise they will read/write the user's real `~/.agentuse/artifacts/`.
 
 ## Architecture
@@ -33,9 +35,8 @@ Everything lives under `rootDir()` (default `~/.agentuse/artifacts/`, overridabl
 
 - `feed.jsonl`, the append-only submission log. One `FeedEntry` per line, oldest first. This is the source of truth for what exists.
 - `store/<projectId>/<slug>/<rev>/…`, the copied bundles. Immutable once written; a re-submit writes a new `<rev>`.
-- `manifest.json`, the project registry only: `projects: Record<projectId, { name, path, createdAt, updatedAt? }>`. `SCHEMA_VERSION = 1`.
 - `preview-cache/`, generated WebP thumbnails, keyed by entry id + contentHash + width.
-- `.lock`, advisory lock for registry and feed-rewrite operations.
+- `.lock`, advisory lock for whole-file feed rewrites.
 - `.serve.pid`, JSON record of the running viewer server (pid + port + startedAt).
 
 **Why the store copies instead of pointing at the project file.** Three reasons, all load-bearing:
@@ -62,16 +63,16 @@ The cost is disk. `pruneStore()` (CLI: `artifacts prune`) keeps the newest N rev
 - **Dedupe requires content *and* metadata to match.** Same `contentHash` + same title + same tags → return the existing entry, `deduped: true`, no new line. A changed title or tag is a real edit and becomes a revision. This is what keeps agent re-runs from spamming the feed while still letting a re-tag land.
 - `deriveTitle()` precedence: `--title`, frontmatter `title:`, first `#` heading (fenced code blocks skipped, READMEs are full of `# comment` lines), HTML `<title>` then `<h1>`, humanized slug.
 
-### Registry concurrency
+### Feed-rewrite concurrency
 
-Project-registry mutations go through `withLock()` in `src/manifest.ts`:
+Whole-file rewrites of `feed.jsonl` go through `withLock()` in `src/lock.ts`:
 1. Atomic `open(..., "wx")` on `.lock` with a JSON body (`pid`, `host`, `acquiredAt`).
 2. Stale lock detection: locks older than 60s OR same-host with a dead pid get reclaimed.
 3. Acquisition timeout is 5s; failure throws `LOCK_TIMEOUT` and includes the holder.
 4. SIGINT/SIGTERM release the lock before exit.
 5. Writes use a `tmp` + `rename` pattern with `fsync`.
 
-Reads outside `withLock` are tolerated (writes are atomic). Writers: `init`, `open`, `submit` (it registers the project), `project add/forget/prune`, plus `pruneStore()` and `forgetProjectArtifacts()` which rewrite `feed.jsonl` wholesale. Appending to the feed deliberately does **not** take the lock, see "Feed log semantics".
+Reads outside `withLock` are tolerated (the rewrite is a `tmp` + `rename`). There are exactly two writers: `pruneStore()` and `forgetProjectArtifacts()`. Appending to the feed deliberately does **not** take the lock, see "Feed log semantics".
 
 ### Project identity
 
@@ -97,10 +98,10 @@ Routes:
 - `GET /api/store/:entryId/:path...` -> one file out of the stored bundle. An empty path serves the entry file. HTML is sanitized on every read; other types get a type-appropriate CSP. `cache-control: immutable` is safe here **only** because an entry id names one immutable revision.
 - `GET /api/preview/:entryId?w=` -> cached WebP thumbnail for image entries. 400 for non-images.
 - `GET /api/raw/:entryId` -> the entry file exactly as submitted, `application/octet-stream` + `Content-Disposition: attachment` (powers Download / Copy content; never rendered inline).
-- `GET/POST /api/projects`, `POST /api/projects/prune`, `DELETE /api/projects/:id` -> the registry. The DELETE also drops that project's feed entries and stored bundles.
+- `DELETE /api/projects/:id` -> drop every feed entry and stored bundle for that project. This is the only project route; there is no registry to list, add to, or prune.
 - Everything else falls back to `viewer-dist/index.html` for SPA routes (`/`, `/a/:entryId`).
 
-There is no `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, or `/api/settings` any more. They belonged to the scanner.
+There is no `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, `/api/settings`, or `GET`/`POST /api/projects` any more. They belonged to the scanner and the registry it needed.
 
 Server lifecycle:
 - `serve` writes `.serve.pid`. `serve --detach` re-spawns `dist/bin.js serve --port N` with `detached: true` and `stdio: "ignore"`, then polls `.serve.pid` for up to 5s. `serve --stop` SIGTERMs and cleans up.
@@ -142,8 +143,8 @@ When modifying sanitization: do not switch to regex; do not relax `connect-src` 
 
 ## Conventions specific to this repo
 
-- TypeScript: `strict` + `noUncheckedIndexedAccess`. Indexed access into `manifest.projects[id]` returns `T | undefined`; respect this rather than `!`-asserting blindly.
+- TypeScript: `strict` + `noUncheckedIndexedAccess`. Indexed access returns `T | undefined`; respect this rather than `!`-asserting blindly.
 - ESM throughout. Imports use `.js` extensions even for `.ts` source (NodeNext-style for `Bundler` resolution).
 - Never call `process.exit` outside `cli.ts`'s `fail()` / commander callbacks. Library code throws `CliError`.
-- Registry and feed rewrites go `tmp + fsync + rename` through `writeManifestAtomic` / `writeFeedAtomic`. Bundle copies use the same pattern at directory level. The CLI never writes to the user's own project files, it only reads them at submit time.
+- Feed rewrites go `tmp + fsync + rename` through `writeFeedAtomic`. Bundle copies use the same pattern at directory level. The CLI never writes to the user's own project files, it only reads them at submit time.
 - When adding a CLI flag, also add a JSON-output shape to the corresponding `emit()` call so `--json` consumers see it.

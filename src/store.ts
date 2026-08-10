@@ -13,9 +13,8 @@ import {
   type FeedEntry,
 } from "./feed.js";
 import { readImageDims } from "./imageDims.js";
-import { withLock } from "./manifest.js";
+import { withLock } from "./lock.js";
 import { storeDir } from "./paths.js";
-import { projectLocalArtifactsDir, registerProjectPath } from "./projects.js";
 import { resolveProject } from "./project.js";
 import { inferType, type ArtifactType } from "./validation.js";
 
@@ -44,6 +43,9 @@ const SKIP_DIRS = new Set([
 ]);
 
 const ENTRY_CANDIDATES = ["index.html", "index.htm", "index.md", "index.markdown", "index.agentuse"];
+
+/** Pre-0.4 drop zone. Only `import` still reads it; nothing writes it. */
+const LOCAL_ARTIFACTS_REL = path.join(".agentuse", "artifacts");
 
 export interface SubmitOptions {
   /** File or directory to submit. */
@@ -83,7 +85,7 @@ export async function submitArtifact(opts: SubmitOptions): Promise<SubmitResult>
   const entryRel = pickEntryFile(files, stat.isDirectory());
   const entryType = inferType(entryRel);
 
-  const project = await registerProjectPath(opts.cwd ?? (stat.isDirectory() ? abs : path.dirname(abs)));
+  const project = resolveProject(opts.cwd ?? (stat.isDirectory() ? abs : path.dirname(abs)));
   const slug = makeSlug(opts.slug ?? (stat.isDirectory() ? path.basename(abs) : stripExt(path.basename(abs))));
   const contentHash = hashBundle(files);
 
@@ -135,7 +137,7 @@ export async function submitArtifact(opts: SubmitOptions): Promise<SubmitResult>
 /** One-shot migration: submit everything under <project>/.agentuse/artifacts/. */
 export async function importLocalArtifacts(cwd = process.cwd()): Promise<SubmitResult[]> {
   const project = resolveProject(cwd);
-  const root = projectLocalArtifactsDir(project.path);
+  const root = path.join(project.path, LOCAL_ARTIFACTS_REL);
   if (!fs.existsSync(root)) {
     throw new CliError("INVALID_INPUT", `no artifacts directory at ${root}`);
   }
@@ -204,7 +206,11 @@ export async function forgetProjectArtifacts(projectId: string): Promise<number>
     const entries = readFeedEntries();
     const keep = entries.filter((e) => e.projectId !== projectId);
     dropped = entries.length - keep.length;
-    if (dropped > 0) writeFeedAtomic(keep);
+    // A typo'd id would otherwise report a cheerful "dropped 0".
+    if (dropped === 0) {
+      throw new CliError("INVALID_INPUT", `no artifacts from project: ${projectId}`);
+    }
+    writeFeedAtomic(keep);
   });
   rmDir(path.join(storeDir(), projectId));
   return dropped;

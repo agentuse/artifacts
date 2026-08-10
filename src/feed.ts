@@ -50,7 +50,7 @@ export interface FeedPage {
   tags: Array<{ tag: string; count: number }>;
 }
 
-export const MAX_TAGS = 12;
+const MAX_TAGS = 12;
 const MAX_TAG_LEN = 32;
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 200;
@@ -173,10 +173,6 @@ export function writeFeedAtomic(entries: FeedEntry[]): void {
   fs.renameSync(tmp, feedPath());
 }
 
-export function findFeedEntry(id: string): FeedEntry | undefined {
-  return readFeedEntries().find((e) => e.id === id);
-}
-
 /** All revisions of one artifact, newest first. */
 export function feedEntryRevisions(entries: FeedEntry[], projectId: string, slug: string): FeedEntry[] {
   return entries
@@ -246,7 +242,7 @@ function compareNewestFirst(a: FeedEntry, b: FeedEntry): number {
   return b.id.localeCompare(a.id);
 }
 
-export function entryTime(entry: FeedEntry): number {
+function entryTime(entry: FeedEntry): number {
   return new Date(entry.submittedAt).getTime() || 0;
 }
 
@@ -275,6 +271,6 @@ export function entryStoreRel(entry: FeedEntry): string {
   return path.join(entry.projectId, entry.slug, revDirName(entry.rev));
 }
 
-export function revDirName(rev: number): string {
+function revDirName(rev: number): string {
   return String(rev).padStart(4, "0");
 }

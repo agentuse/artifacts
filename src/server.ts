@@ -6,7 +6,6 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { CliError } from "./errors.js";
-import { SCHEMA_VERSION } from "./manifest.js";
 import {
   feedEntryRevisions,
   feedStamp,
@@ -16,12 +15,6 @@ import {
 } from "./feed.js";
 import { previewCacheDir, rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
-import {
-  forgetProject,
-  initProject,
-  listRegisteredProjects,
-  pruneMissingProjects,
-} from "./projects.js";
 import { forgetProjectArtifacts, resolveBundleFile } from "./store.js";
 
 export const DEFAULT_PORT = 7878;
@@ -144,31 +137,6 @@ function sendNotModified(res: http.ServerResponse, etag: string, cacheControl: s
     "x-content-type-options": "nosniff",
   });
   res.end();
-}
-
-async function readJsonBody(req: http.IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buf.length;
-    if (size > 128 * 1024) throw new CliError("INVALID_INPUT", "request body too large");
-    chunks.push(buf);
-  }
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    throw new CliError("INVALID_INPUT", "request body must be JSON");
-  }
-}
-
-function bodyObject(body: unknown): Record<string, unknown> {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new CliError("INVALID_INPUT", "request body must be an object");
-  }
-  return body as Record<string, unknown>;
 }
 
 function findEntry(id: string): FeedEntry | undefined {
@@ -423,47 +391,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     return;
   }
 
-  if (pathname === "/api/projects" && req.method === "GET") {
-    try {
-      sendJson(res, {
-        schemaVersion: SCHEMA_VERSION,
-        projects: Object.fromEntries(listRegisteredProjects()),
-      });
-    } catch (e) {
-      send(res, 500, (e as Error).message);
-    }
-    return;
-  }
-
-  if (pathname === "/api/projects" && req.method === "POST") {
-    try {
-      const body = bodyObject(await readJsonBody(req));
-      if (typeof body.path !== "string" || !body.path.trim()) {
-        throw new CliError("INVALID_INPUT", "path is required");
-      }
-      sendJson(res, await initProject(body.path));
-    } catch (e) {
-      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
-      send(res, code, (e as Error).message);
-    }
-    return;
-  }
-
-  if (pathname === "/api/projects/prune" && req.method === "POST") {
-    try {
-      sendJson(res, { removed: await pruneMissingProjects() });
-    } catch (e) {
-      send(res, 500, (e as Error).message);
-    }
-    return;
-  }
-
+  // /api/projects/{projectId} DELETE -> drop every artifact from that project.
+  // There is no project registry: the viewer lists whatever the feed reports,
+  // so this is artifact management, not deregistration.
   const deleteProjectMatch = /^\/api\/projects\/([^/]+)$/.exec(pathname);
   if (deleteProjectMatch && req.method === "DELETE") {
     try {
-      const out = await forgetProject(decodeURIComponent(deleteProjectMatch[1]!));
-      const droppedArtifacts = await forgetProjectArtifacts(out.projectId);
-      sendJson(res, { ...out, droppedArtifacts });
+      const projectId = decodeURIComponent(deleteProjectMatch[1]!);
+      const droppedArtifacts = await forgetProjectArtifacts(projectId);
+      sendJson(res, { projectId, droppedArtifacts });
     } catch (e) {
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
       send(res, code, (e as Error).message);

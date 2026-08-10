@@ -49,7 +49,7 @@ Requires Node.js 20+.
 | --- | --- |
 | Claude Code, Cursor, Codex, Windsurf, Cline, and other interactive coding agents | Install the Skill with `npx skills add agentuse/artifacts`, then ask the agent to save reports or dashboards as artifacts. |
 | AgentUse and other async/scheduled agents | Install the same Skill globally with `npx skills add agentuse/artifacts -g`, then let the agent submit its output when a run finishes. |
-| Custom runners, CI jobs, and shell scripts | Call `npx @agentuse/artifacts submit <path> --tag <tag>` at the end of the job. No setup step: submit registers the project itself. |
+| Custom runners, CI jobs, and shell scripts | Call `npx @agentuse/artifacts submit <path> --tag <tag>` at the end of the job. No setup step is needed. |
 | Remote VMs or chat-based agents | Run the viewer on the machine where artifacts are written. It binds to `127.0.0.1:7878`; use SSH port forwarding, Tailscale Serve, or another private tunnel to view it from your laptop. |
 
 If the `skills` CLI does not know your agent yet, copy `skills/agentuse-artifacts/SKILL.md` into that agent's skill or instruction directory. The underlying contract is just files on disk plus the local viewer.
@@ -88,6 +88,7 @@ The viewer renders Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, and PDF. 
 - **Artifacts are copied, not referenced.** A feed entry is a snapshot: it still opens after the source file is edited, gitignored away, or deleted with the branch.
 - **Revisions are free.** Re-submitting the same slug adds a revision; identical content is a no-op, so re-runs don't spam the feed.
 - Settings, ignore patterns, and the project-scan cap are gone with the scanner that needed them.
+- **No project registry.** Nothing has to be registered. A project is whatever the feed reports, so `manifest.json`, `artifacts init`, and `project add`/`project prune` are gone.
 
 ## Storage
 
@@ -95,7 +96,6 @@ The viewer renders Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, and PDF. 
 ~/.agentuse/artifacts/
   feed.jsonl                              append-only submission log
   store/<projectId>/<slug>/<rev>/         copied bundles
-  manifest.json                           project registry
   preview-cache/
   .serve.pid
 ```
@@ -122,12 +122,12 @@ Every command supports `--json`.
 | `artifacts feed [--project ID] [--tag T] [--limit N] [--all-revisions]` | List submitted artifacts, newest first. |
 | `artifacts import [dir]` | Submit everything already in `<dir>/.agentuse/artifacts/`. |
 | `artifacts prune [--keep N]` | Delete superseded revisions from the store (default: keep 5). |
-| `artifacts open [--port N] [--detach] [--no-browser]` | Register the current project, start or reuse the viewer, open its feed. |
+| `artifacts open [--port N] [--detach] [--no-browser]` | Start or reuse the viewer and open this project's feed. |
 | `artifacts url [--all]` | Print the feed URL, filtered to the current project unless `--all`. |
 | `artifacts serve [--port N] [--detach] [--stop] [--fail-if-running]` | Manage only the local viewer server. |
-| `artifacts init` | Create `.agentuse/artifacts` and register the project. Optional; submit registers too. |
 | `artifacts where` | Print the global storage path. |
-| `artifacts project list / add / forget / prune` | Manage registered project directories. |
+| `artifacts project list` | List projects that have submitted artifacts, with counts. |
+| `artifacts project forget <projectId>` | Delete every artifact from a project, feed lines and stored bundles. |
 
 ## Security
 

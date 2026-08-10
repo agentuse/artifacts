@@ -7,19 +7,6 @@ export type ArtifactType =
   | "webp"
   | "pdf";
 
-export interface ProjectRecord {
-  name: string;
-  path: string;
-  createdAt: string;
-  updatedAt?: string;
-}
-
-export interface ProjectInfo {
-  projectId: string;
-  name: string;
-  path: string;
-}
-
 /** One submission, as returned by /api/feed and /api/entry/:id. */
 export interface FeedEntry {
   id: string;
@@ -52,9 +39,4 @@ export interface FeedPage {
 export interface EntryDetail {
   entry: FeedEntry;
   revisions: FeedEntry[];
-}
-
-export interface ProjectIndex {
-  schemaVersion: number;
-  projects: Record<string, ProjectRecord>;
 }

@@ -6,7 +6,7 @@ A rewrite around one idea: an artifact reaches the viewer because an agent **sub
 
 ### Added
 
-- `artifacts submit <path>` copies a file or a whole directory bundle into `~/.agentuse/artifacts/store/` and appends one line to an append-only feed log. Prints the artifact's URL. It registers the project itself, so no setup step is needed.
+- `artifacts submit <path>` copies a file or a whole directory bundle into `~/.agentuse/artifacts/store/` and appends one line to an append-only feed log. Prints the artifact's URL. No setup step is needed.
 - `--title`, `--tag` (repeatable or comma-separated), and `--slug` on submit. Titles fall back to markdown frontmatter, the first heading, or the HTML `<title>`.
 - `artifacts feed` lists submissions newest-first, with `--project`, `--tag`, `--limit`, and `--all-revisions`.
 - `artifacts import` submits everything already sitting in a project's `.agentuse/artifacts/`, the migration path from 0.3.x.
@@ -19,17 +19,18 @@ A rewrite around one idea: an artifact reaches the viewer because an agent **sub
 - **Mobile is the primary target.** Single column, 44px touch targets, lazy card previews, safe-area insets, and pinch-zoom re-enabled.
 - Artifacts are copied into the store rather than referenced in place, so a feed entry keeps working after the source file is edited, gitignored away, or deleted with its branch.
 - `artifacts url` now prints the feed URL for the current project; `open` opens the feed filtered to it.
-- `project forget` also deletes that project's submitted artifacts. Pass `--keep-artifacts` to keep them.
+- `project list` now lists the projects the feed actually reports, with an artifact count each. `project forget <projectId>` deletes every artifact from a project, feed lines and stored bundles.
 
 ### Removed
 
-- Project-wide file discovery, along with the ignore-pattern settings, the `maxProjectScanEntries` cap, and the Settings sheet that configured them. The Projects sheet remains for add/forget/prune.
+- Project-wide file discovery, along with the ignore-pattern settings, the `maxProjectScanEntries` cap, and the Settings sheet that configured them.
+- **The project registry.** `manifest.json` is no longer read or written. Registering a project only mattered while a scanner needed to know where to look; a project is now simply whatever the feed reports. Gone with it: `artifacts init`, `artifacts project add`, `artifacts project prune`, the `--keep-artifacts` flag on `project forget`, and the `GET`/`POST /api/projects` and `POST /api/projects/prune` routes. The viewer's Projects sheet now lists projects by artifact count and only deletes.
 - The pan/zoom canvas, tile resizing, and persisted tile sizes.
 - `artifacts list`, `artifacts url <target> --full`, and the `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, and `/api/settings` routes.
 
 ### Upgrading
 
-Existing artifacts are no longer discovered automatically. Run `npx @agentuse/artifacts import` once per project to publish what is already in `.agentuse/artifacts/`, and update any agent instructions to call `submit` after writing a file. Old `/p/:projectId/a/:name` links do not resolve; the feed is at `/`.
+Existing artifacts are no longer discovered automatically. Run `npx @agentuse/artifacts import` once per project to publish what is already in `.agentuse/artifacts/`, and update any agent instructions to call `submit` after writing a file. Old `/p/:projectId/a/:name` links do not resolve; the feed is at `/`. `~/.agentuse/artifacts/manifest.json` is now unused and safe to delete.
 
 ## 0.3.0 - 2026-06-09
 

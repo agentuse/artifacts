@@ -39,7 +39,7 @@ Inside the package checkout, use `npm run dev -- <command>`. Most commands accep
    npx @agentuse/artifacts submit .agentuse/artifacts/q2-market-analysis --tag research --tag q2
    ```
 
-   `submit` prints the artifact's URL. It registers the project on its own, so `init` is optional.
+   `submit` prints the artifact's URL. There is no setup step.
 
 3. **Give the user the URL** that `submit` printed. If the viewer is not running yet, start it once:
 
@@ -81,14 +81,11 @@ Re-submitting byte-identical content with the same title and tags is a no-op, it
 | `feed [--project ID] [--tag T] [--limit N] [--all-revisions]` | List submitted artifacts, newest first. |
 | `import [dir]` | One-shot migration: submit everything already in `<dir>/.agentuse/artifacts/`. |
 | `prune [--keep N]` | Delete superseded revisions from the store (default: keep 5 per artifact). |
-| `open [--port N] [--detach] [--no-browser]` | Register the project, ensure the viewer is running, open the feed filtered to it. |
+| `open [--port N] [--detach] [--no-browser]` | Ensure the viewer is running, open the feed filtered to this project. |
 | `url [--all]` | Print the feed URL, filtered to the current project unless `--all`. |
-| `serve [--port N] [--detach] [--stop] [--fail-if-running]` | Start/stop the viewer server only. Does not register the cwd. |
-| `init` | Create `./.agentuse/artifacts/` and register the project. Optional; `submit` registers too. |
-| `project list` | List registered projects. |
-| `project add [dir]` | Register a project directory. |
-| `project forget <projectId\|path> [--keep-artifacts]` | Forget a project and delete its submitted artifacts. `--keep-artifacts` keeps them. |
-| `project prune` | Forget registry entries whose paths no longer exist. |
+| `serve [--port N] [--detach] [--stop] [--fail-if-running]` | Start/stop the viewer server only. |
+| `project list` | List projects that have submitted artifacts, with counts. |
+| `project forget <projectId>` | Delete every artifact from a project, feed lines and stored bundles. |
 | `where` | Print the storage root, default `~/.agentuse/artifacts/`. |
 
 ## Naming
@@ -165,9 +162,9 @@ npx @agentuse/artifacts import
 
 - **`submit` copies.** Editing the original file afterwards does not change what was submitted; submit again to add a revision. This is intentional, a feed entry is a snapshot of a moment.
 - The store grows with every revision. Run `prune` occasionally, or when the user asks about disk use.
-- `project forget` **does** delete that project's submitted artifacts from the store (use `--keep-artifacts` to keep them). It never touches the project's own files.
+- `project forget` deletes that project's artifacts from the feed and the store. It never touches the project's own files.
 - HTML is sanitized at render time and runs in a sandboxed iframe. Keep using relative paths for local CSS and images.
-- `serve` is server lifecycle only; it does not register the current directory.
+- There is no project registry. A project is derived from the git root at submit time, and the viewer lists whatever the feed reports.
 
 ## Safety notes
 

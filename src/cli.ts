@@ -4,14 +4,7 @@ import { viewerEntryUrl, viewerFeedUrl } from "./artifacts.js";
 import { queryFeed, type FeedEntry } from "./feed.js";
 import { rootDir } from "./paths.js";
 import { resolveProject } from "./project.js";
-import {
-  forgetProject,
-  initProject,
-  listRegisteredProjects,
-  openBrowser,
-  pruneMissingProjects,
-  registerProjectPath,
-} from "./projects.js";
+import { openBrowser } from "./browser.js";
 import { forgetProjectArtifacts, importLocalArtifacts, pruneStore, submitArtifact } from "./store.js";
 import {
   DEFAULT_PORT,
@@ -180,31 +173,15 @@ export async function runCli(argv: string[]): Promise<void> {
     });
 
   program
-    .command("init")
-    .description("Create .agentuse/artifacts and register the current project")
-    .action(async () => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        const out = await initProject();
-        emit(global.json, out, () => {
-          human(`✓ initialized ${out.project.name}`);
-          human(`  ${out.artifactsDir}`);
-        });
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  program
     .command("open")
-    .description("Register current project, ensure the viewer is running, and print/open its feed URL")
+    .description("Ensure the viewer is running, then print/open this project's feed URL")
     .option("--port <n>", `preferred port when starting the server (default ${DEFAULT_PORT})`)
     .option("--detach", "run server in background when starting it")
     .option("--no-browser", "do not open the browser")
     .action(async (opts: Record<string, string | boolean>) => {
       const global = program.opts<GlobalOpts>();
       try {
-        const project = await registerProjectPath(process.cwd());
+        const project = resolveProject();
         const existing = isServerRunning();
         const status = existing ?? await startServer({
           preferredPort: opts.port ? parseInt(String(opts.port), 10) : DEFAULT_PORT,
@@ -241,48 +218,26 @@ export async function runCli(argv: string[]): Promise<void> {
       emit(global.json, { path: rootDir() }, () => human(rootDir()));
     });
 
+  // Projects are not registered anywhere: they are whatever the feed reports.
+  // `resolveProject()` derives the id from the git root at submit time.
   const project = program
     .command("project")
-    .description("Manage registered project directories");
+    .description("Inspect and delete artifacts by project");
 
   project
     .command("list")
-    .description("List registered projects")
-    .option("--sort <name|updated>", "sort projects by name or last updated", "name")
-    .action((opts: { sort: string }) => {
+    .description("List projects that have submitted artifacts")
+    .action(() => {
       const global = program.opts<GlobalOpts>();
       try {
-        if (opts.sort !== "name" && opts.sort !== "updated") {
-          throw new CliError("INVALID_INPUT", "--sort must be 'name' or 'updated'");
-        }
-        const projects = listRegisteredProjects(opts.sort);
-        emit(
-          global.json,
-          { projects: projects.map(([projectId, p]) => ({ projectId, ...p })) },
-          () => {
-            if (projects.length === 0) {
-              human("(no registered projects)");
-              return;
-            }
-            for (const [projectId, p] of projects) {
-              human(`  ${projectId}  ${p.name}  ${p.path}`);
-            }
-          },
-        );
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  project
-    .command("add")
-    .description("Register a project directory and create its .agentuse/artifacts folder")
-    .argument("[dir]", "project directory", ".")
-    .action(async (dir: string) => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        const out = await initProject(dir);
-        emit(global.json, out, () => human(`✓ registered ${out.project.name} (${out.project.path})`));
+        const { projects } = queryFeed({ limit: 1 });
+        emit(global.json, { projects }, () => {
+          if (projects.length === 0) {
+            human("(no artifacts submitted yet)");
+            return;
+          }
+          for (const p of projects) human(`  ${p.projectId}  ${p.projectName}  ${p.count}`);
+        });
       } catch (e) {
         fail(global.json, e);
       }
@@ -290,32 +245,15 @@ export async function runCli(argv: string[]): Promise<void> {
 
   project
     .command("forget")
-    .description("Remove a project from the registry and drop its submitted artifacts")
-    .argument("<projectIdOrPath>")
-    .option("--keep-artifacts", "leave the project's feed entries and stored bundles in place")
-    .action(async (ref: string, opts: { keepArtifacts?: boolean }) => {
+    .description("Delete every artifact submitted from a project, from the feed and from disk")
+    .argument("<projectId>")
+    .action(async (projectId: string) => {
       const global = program.opts<GlobalOpts>();
       try {
-        const out = await forgetProject(ref);
-        const droppedArtifacts = opts.keepArtifacts
-          ? 0
-          : await forgetProjectArtifacts(out.projectId);
-        emit(global.json, { ...out, droppedArtifacts }, () =>
-          human(`✓ forgot ${out.project.name} (${out.projectId}), dropped ${droppedArtifacts} artifact(s)`),
+        const droppedArtifacts = await forgetProjectArtifacts(projectId);
+        emit(global.json, { projectId, droppedArtifacts }, () =>
+          human(`✓ dropped ${droppedArtifacts} artifact(s) from ${projectId}`),
         );
-      } catch (e) {
-        fail(global.json, e);
-      }
-    });
-
-  project
-    .command("prune")
-    .description("Forget registered projects whose paths no longer exist")
-    .action(async () => {
-      const global = program.opts<GlobalOpts>();
-      try {
-        const removed = await pruneMissingProjects();
-        emit(global.json, { removed }, () => human(`✓ pruned ${removed.length} project(s)`));
       } catch (e) {
         fail(global.json, e);
       }

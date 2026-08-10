@@ -1,80 +1,14 @@
 import fs from "node:fs";
 import os from "node:os";
 import { CliError } from "./errors.js";
-import { lockPath, manifestPath, rootDir } from "./paths.js";
-
-export const SCHEMA_VERSION = 1;
-
-export interface ProjectRecord {
-  name: string;
-  path: string;
-  createdAt: string;
-  updatedAt?: string;
-}
+import { lockPath, rootDir } from "./paths.js";
 
 /**
- * The registry is only a project index now. Submitted artifacts live in the
- * append-only feed log (`feed.jsonl`) plus the bundle store, neither of which
- * goes through this file — so the registry stays small and rarely written.
+ * Advisory lock for whole-file rewrites of `feed.jsonl` (prune, forget).
+ * Appending a single feed line deliberately does NOT take this lock: one
+ * `O_APPEND` write under the pipe-buffer size is atomic, so concurrent agents
+ * can submit without contending.
  */
-export interface Manifest {
-  schemaVersion: number;
-  projects: Record<string, ProjectRecord>;
-}
-
-function emptyManifest(): Manifest {
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    projects: {},
-  };
-}
-
-export function readManifest(): Manifest {
-  if (!fs.existsSync(manifestPath())) return emptyManifest();
-  let raw: string;
-  try {
-    raw = fs.readFileSync(manifestPath(), "utf8");
-  } catch (e) {
-    throw new CliError("IO_ERROR", `cannot read manifest: ${(e as Error).message}`);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    throw new CliError("CORRUPT_MANIFEST", `manifest JSON parse failed: ${(e as Error).message}`);
-  }
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    typeof (parsed as Manifest).schemaVersion !== "number"
-  ) {
-    throw new CliError("CORRUPT_MANIFEST", "manifest missing schemaVersion");
-  }
-  const m = parsed as Manifest;
-  if (m.schemaVersion !== SCHEMA_VERSION) {
-    throw new CliError(
-      "CORRUPT_MANIFEST",
-      `manifest schemaVersion ${m.schemaVersion} != ${SCHEMA_VERSION}`,
-    );
-  }
-  // Defensive default for forward-compat reads.
-  m.projects ??= {};
-  return { schemaVersion: m.schemaVersion, projects: m.projects };
-}
-
-export function writeManifestAtomic(manifest: Manifest): void {
-  fs.mkdirSync(rootDir(), { recursive: true });
-  const tmp = manifestPath() + ".tmp." + process.pid;
-  const data = JSON.stringify(manifest, null, 2);
-  const fd = fs.openSync(tmp, "w");
-  try {
-    fs.writeFileSync(fd, data);
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(tmp, manifestPath());
-}
 
 interface LockBody {
   pid: number;
@@ -142,7 +76,7 @@ export async function withLock<T>(fn: () => Promise<T> | T): Promise<T> {
       } catch {
         /* ignore */
       }
-      throw new CliError("LOCK_TIMEOUT", "could not acquire manifest lock", {
+      throw new CliError("LOCK_TIMEOUT", "could not acquire artifact store lock", {
         holder,
       });
     }

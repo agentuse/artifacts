@@ -2,14 +2,12 @@ export type ErrorCode =
   | "GENERIC"
   | "INVALID_INPUT"
   | "LOCK_TIMEOUT"
-  | "CORRUPT_MANIFEST"
   | "IO_ERROR";
 
 const EXIT: Record<ErrorCode, number> = {
   GENERIC: 1,
   INVALID_INPUT: 2,
   LOCK_TIMEOUT: 5,
-  CORRUPT_MANIFEST: 6,
   IO_ERROR: 7,
 };
 

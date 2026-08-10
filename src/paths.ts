@@ -7,9 +7,6 @@ export function rootDir(): string {
     : path.join(os.homedir(), ".agentuse", "artifacts");
 }
 
-export function manifestPath(): string {
-  return path.join(rootDir(), "manifest.json");
-}
 /** Append-only submission log. One JSON object per line, oldest first. */
 export function feedPath(): string {
   return path.join(rootDir(), "feed.jsonl");

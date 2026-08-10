@@ -4,7 +4,7 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-export function relativeTime(iso: string, now: number): string {
+function relativeTime(iso: string, now: number): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return "";
   const delta = Math.max(0, now - then);
