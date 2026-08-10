@@ -31,7 +31,7 @@ Inside the package checkout, use `npm run dev -- <command>`. Most commands accep
 
 ## Standard workflow
 
-1. **Write the file(s).** Put generated output in `./.agentuse/artifacts/<name>/`, which is gitignored scratch space in most projects. A single file is fine too.
+1. **Write the file(s).** Anywhere works, `submit` copies from wherever the file is. `./.agentuse/artifacts/<name>/` is the usual scratch spot for generated output; create it yourself if it is missing. A single file is fine too.
 
 2. **Submit it.**
 
