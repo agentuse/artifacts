@@ -94,7 +94,7 @@ Note the ordering consequence: `submit` derives the project from the **target's*
 
 Routes:
 - `GET /api/feed?project&tag&q&limit&cursor` -> a `FeedPage`: entries, `nextCursor`, `total`, and the project/tag facets. ETag is `sha(feedStamp + query)`, so the viewer's 5s poll is a conditional request that normally 304s.
-- `GET /api/entry/:id` -> `{ entry, revisions }` for the detail page.
+- `GET /api/entry/:id` -> `{ entry, revisions }` for the detail page. Same ETag scheme as the feed (`feedStamp` + id): the detail view polls this every 5s so a new revision shows up while you're on the page, and it 304s while nothing changes. The viewer auto-follows the newest revision only when the latest one is on screen; an explicitly opened older revision stays put.
 - `GET /api/store/:entryId/:path...` -> one file out of the stored bundle. An empty path serves the entry file. HTML is sanitized on every read; other types get a type-appropriate CSP. `cache-control: immutable` is safe here **only** because an entry id names one immutable revision.
 - `GET /api/preview/:entryId?w=` -> cached WebP thumbnail for image entries. 400 for non-images.
 - `GET /api/raw/:entryId` -> the entry file exactly as submitted, `application/octet-stream` + `Content-Disposition: attachment` (powers Download / Copy content; never rendered inline).
