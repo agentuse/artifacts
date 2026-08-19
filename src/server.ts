@@ -283,6 +283,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   const entryMatch = /^\/api\/entry\/([A-Za-z0-9_]+)$/.exec(pathname);
   if (entryMatch && req.method === "GET") {
     try {
+      // Same conditional-request scheme as /api/feed: the detail view polls
+      // this route to notice new revisions, and a 304 keeps that poll cheap.
+      const etag = etagOf(feedStamp(), entryMatch[1]!);
+      if (req.headers["if-none-match"] === etag) {
+        sendNotModified(res, etag, "no-store");
+        return;
+      }
       const entries = readFeedEntries();
       const entry = entries.find((e) => e.id === entryMatch[1]!);
       if (!entry) {
@@ -292,7 +299,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       sendJson(res, {
         entry,
         revisions: feedEntryRevisions(entries, entry.projectId, entry.slug),
-      });
+      }, { etag });
     } catch (e) {
       send(res, 500, (e as Error).message);
     }

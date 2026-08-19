@@ -40,11 +40,23 @@ export async function fetchFeed(
   return { page: (await res.json()) as FeedPage, etag: res.headers.get("etag"), notModified: false };
 }
 
-export async function fetchEntry(id: string): Promise<EntryDetail> {
-  const res = await fetch(`/api/entry/${encodeURIComponent(id)}`, { cache: "no-store" });
+export interface EntryFetchResult {
+  detail: EntryDetail | null;
+  etag: string | null;
+  notModified: boolean;
+}
+
+export async function fetchEntry(id: string, etag?: string | null): Promise<EntryFetchResult> {
+  const res = await fetch(`/api/entry/${encodeURIComponent(id)}`, {
+    cache: "no-store",
+    headers: etag ? { "if-none-match": etag } : undefined,
+  });
+  if (res.status === 304) {
+    return { detail: null, etag: res.headers.get("etag") ?? etag ?? null, notModified: true };
+  }
   if (res.status === 404) throw new Error("This artifact is no longer in the feed.");
   if (!res.ok) throw new Error(`entry fetch failed: ${res.status}`);
-  return (await res.json()) as EntryDetail;
+  return { detail: (await res.json()) as EntryDetail, etag: res.headers.get("etag"), notModified: false };
 }
 
 /** Bundle file URL. Bundles are immutable, so no cache-busting is needed. */

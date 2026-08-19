@@ -5,6 +5,8 @@ import { ArtifactBody, isTextEntry, typeLabel } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import type { EntryDetail, FeedEntry } from "../types";
 
+const POLL_MS = 5_000;
+
 export function Detail(props: {
   entryId: string;
   onBack: () => void;
@@ -16,20 +18,48 @@ export function Detail(props: {
   // Owned here, not inside Actions, so Escape can dismiss the menu without
   // also leaving the page — both listeners see the same keydown.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Ref so the poll effect doesn't restart when the parent re-renders and
+  // hands down a fresh callback identity.
+  const onOpenEntryRef = useRef(props.onOpenEntry);
+  onOpenEntryRef.current = props.onOpenEntry;
 
+  // Poll like the feed does: a 304 costs one conditional request. When a new
+  // revision lands while the user is on the latest one, follow it — that is
+  // what "staying on the artifact" means. A deliberately opened older
+  // revision is left alone.
   useEffect(() => {
     let alive = true;
+    let etag: string | null = null;
+    let wasLatest: boolean | null = null;
     setDetail(null);
     setError(null);
-    fetchEntry(props.entryId)
-      .then((next) => {
-        if (alive) setDetail(next);
-      })
-      .catch((e) => {
-        if (alive) setError((e as Error).message);
-      });
+
+    const tick = async () => {
+      const first = wasLatest === null;
+      try {
+        const result = await fetchEntry(props.entryId, etag);
+        if (!alive) return;
+        etag = result.etag;
+        if (result.notModified || !result.detail) return;
+        const next = result.detail;
+        const newest = next.revisions[0];
+        if (wasLatest === null) wasLatest = !newest || newest.rev <= next.entry.rev;
+        setDetail(next);
+        if (wasLatest && newest && newest.rev > next.entry.rev) {
+          onOpenEntryRef.current(newest.id);
+        }
+      } catch (e) {
+        // Only the initial load surfaces an error; a transient poll failure
+        // shouldn't replace a page the user is reading.
+        if (alive && first) setError((e as Error).message);
+      }
+    };
+
+    void tick();
+    const id = window.setInterval(() => void tick(), POLL_MS);
     return () => {
       alive = false;
+      window.clearInterval(id);
     };
   }, [props.entryId]);
 
