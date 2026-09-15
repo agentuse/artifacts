@@ -16,6 +16,7 @@ import {
 import { previewCacheDir, rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import { forgetProjectArtifacts, resolveBundleFile } from "./store.js";
+import { allowShareRequest, isSharingConfigured, shareArtifact, ShareError } from "./share.js";
 
 export const DEFAULT_PORT = 7878;
 const HOST = "127.0.0.1";
@@ -257,6 +258,22 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   const url = new URL(req.url ?? "/", `http://${HOST}`);
   const pathname = url.pathname;
 
+  const shareMatch = /^\/api\/entry\/([A-Za-z0-9_]+)\/share$/.exec(pathname);
+  if (shareMatch && req.method === "POST") {
+    if (!allowShareRequest(req)) {
+      send(res, 403, "Sharing requires a request from the local artifact viewer.");
+      return;
+    }
+    const entry = findEntry(shareMatch[1]!);
+    if (!entry) { send(res, 404, "Artifact not found."); return; }
+    try { sendJson(res, await shareArtifact(entry), { "cache-control": "no-store" }); }
+    catch (error) {
+      send(res, error instanceof ShareError ? error.status : 500,
+        error instanceof ShareError ? error.message : "Sharing failed. Please retry.");
+    }
+    return;
+  }
+
   // /api/feed -> newest-first page plus project/tag facets for the chips.
   if (pathname === "/api/feed" && req.method === "GET") {
     try {
@@ -285,7 +302,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     try {
       // Same conditional-request scheme as /api/feed: the detail view polls
       // this route to notice new revisions, and a 304 keeps that poll cheap.
-      const etag = etagOf(feedStamp(), entryMatch[1]!);
+      const sharingEnabled = isSharingConfigured();
+      const etag = etagOf(feedStamp(), entryMatch[1]!, String(sharingEnabled));
       if (req.headers["if-none-match"] === etag) {
         sendNotModified(res, etag, "no-store");
         return;
@@ -299,6 +317,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       sendJson(res, {
         entry,
         revisions: feedEntryRevisions(entries, entry.projectId, entry.slug),
+        sharingEnabled,
       }, { etag });
     } catch (e) {
       send(res, 500, (e as Error).message);
@@ -411,6 +430,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
       send(res, code, (e as Error).message);
     }
+    return;
+  }
+
+  // API mistakes must not look like successful HTML responses to the viewer.
+  if (pathname.startsWith("/api/")) {
+    send(res, 404, "API endpoint not found.");
     return;
   }
 

@@ -84,3 +84,20 @@ export async function removeProject(projectId: string): Promise<void> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await res.text());
 }
+
+export async function shareEntry(id: string): Promise<{ id: string; url: string }> {
+  const response = await fetch(`/api/entry/${encodeURIComponent(id)}/share`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-artifacts-share": "1" },
+    body: "{}",
+  });
+  if (response.headers.get("content-type")?.includes("text/html")) {
+    throw new Error("The artifact server is out of date. Rebuild and restart it to enable sharing.");
+  }
+  if (!response.ok) throw new Error(await response.text());
+  const result = await response.json() as { id?: unknown; url?: unknown };
+  if (typeof result.id !== "string" || typeof result.url !== "string") {
+    throw new Error("The sharing service returned an invalid link. Please retry.");
+  }
+  return { id: result.id, url: result.url };
+}

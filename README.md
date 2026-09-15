@@ -80,6 +80,38 @@ npx @agentuse/artifacts open
 
 The viewer renders Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, and PDF. HTML artifacts are sanitized and loaded in a sandboxed iframe.
 
+### Share an artifact
+
+Open an artifact and click **Share**. The local server uploads the stored revision
+and its bundled files, then the viewer copies a unique cloud URL to your clipboard.
+Anyone with the link can view it without signing in. If clipboard access is blocked,
+the viewer shows the URL and a **Copy link** button.
+
+Sharing requires a configured Artifacts Cloud service. Set these environment
+variables on the local server, then restart it:
+
+```bash
+export ARTIFACTS_CLOUD_URL=https://api.example.com
+export ARTIFACTS_CLOUD_API_KEY='<your-upload-key>'
+npx @agentuse/artifacts serve
+```
+
+The upload key stays on the local server. The viewer never receives it. Sharing
+the same revision again reuses its active link; sharing another revision creates
+a new snapshot. Links and their management IDs are cached in the local storage
+root's `share-cache/` directory. Revoked or expired links are replaced on the next
+share. The cloud backend is maintained separately in the private
+`agentuse-artifacts-cloud` repository.
+
+Submit a directory to include supplementary files. CSV, TSV, text, Office
+documents (`.xlsx`, `.docx`, `.pptx`), ZIP files, PDFs, and supported visual assets
+are retained with the bundle. Reference them using relative links such as
+`./supplements/data.csv`. Files outside the submitted directory are not uploaded.
+The existing 25 MiB and 200-file bundle limits apply. The initial cloud renderer
+also limits HTML/Markdown files to 2 MiB and displays static content: scripts and
+external CDN resources are blocked, so JavaScript dashboards may differ from the
+local viewer.
+
 ## What 0.4.0 Changes
 
 - **Submit replaces discovery.** Artifacts reach the feed because an agent submitted them, not because a scanner found them. No more whole-project filesystem walks on every poll.

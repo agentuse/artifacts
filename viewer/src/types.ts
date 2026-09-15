@@ -37,6 +37,7 @@ export interface FeedPage {
 }
 
 export interface EntryDetail {
+  sharingEnabled?: boolean;
   entry: FeedEntry;
   revisions: FeedEntry[];
 }

@@ -368,6 +368,13 @@ button, input { font: inherit; color: inherit; }
 }
 
 .detail-sub, .revisions { padding: 10px 16px; }
+.share-control { position: relative; flex-shrink: 0; }
+.share-button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.share-button:disabled { cursor: wait; opacity: 0.6; }
+.share-feedback { position: absolute; top: calc(100% + 8px); right: 0; width: min(320px, calc(100vw - 64px)); padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); box-shadow: 0 8px 30px #0002; font-size: 13px; line-height: 1.5; }
+.share-feedback p { margin: 0 0 8px; }
+.share-feedback input { width: 100%; box-sizing: border-box; padding: 8px; background: var(--bg); color: inherit; border: 1px solid var(--border); border-radius: 4px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .revisions { padding-top: 0; }
 
 /* The body fills whatever is left below the sticky header. A percentage

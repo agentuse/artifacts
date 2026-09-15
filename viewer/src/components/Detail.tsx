@@ -3,6 +3,7 @@ import { ArrowLeft, Check, Copy, Download, FileText, MoreHorizontal } from "luci
 import { bundleUrl, fetchEntry, rawUrl } from "../api";
 import { ArtifactBody, isTextEntry, typeLabel } from "./Render";
 import { RelativeTime } from "./RelativeTime";
+import { ShareButton } from "./ShareButton";
 import type { EntryDetail, FeedEntry } from "../types";
 
 const POLL_MS = 5_000;
@@ -106,6 +107,7 @@ export function Detail(props: {
         title={entry.title}
         onBack={props.onBack}
         entry={entry}
+        sharingEnabled={detail.sharingEnabled === true}
         menuOpen={menuOpen}
         onMenuOpenChange={setMenuOpen}
       />
@@ -155,6 +157,7 @@ function DetailHead(props: {
   title: string;
   onBack: () => void;
   entry?: FeedEntry;
+  sharingEnabled?: boolean;
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
 }) {
@@ -164,6 +167,7 @@ function DetailHead(props: {
         <ArrowLeft size={18} strokeWidth={1.75} />
       </button>
       <h1>{props.title}</h1>
+      {props.entry && props.sharingEnabled && <ShareButton key={props.entry.id} entryId={props.entry.id} />}
       {props.entry && (
         <Actions
           entry={props.entry}

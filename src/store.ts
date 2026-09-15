@@ -312,7 +312,10 @@ function collectBundleFiles(root: string): BundleFile[] {
 }
 
 /** Renderable artifact types plus the support files their markup references. */
-const SUPPORT_EXTENSIONS = new Set([".css", ".svg", ".ico", ".json", ".woff2", ".woff", ".ttf", ".otf", ".gif"]);
+const SUPPORT_EXTENSIONS = new Set([
+  ".css", ".svg", ".ico", ".json", ".woff2", ".woff", ".ttf", ".otf", ".gif",
+  ".csv", ".tsv", ".txt", ".xlsx", ".docx", ".pptx", ".zip",
+]);
 
 function isBundleFile(name: string): boolean {
   const ext = path.extname(name).toLowerCase();
