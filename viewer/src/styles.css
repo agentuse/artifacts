@@ -772,3 +772,16 @@ button, input { font: inherit; color: inherit; }
 .app-notice.error {
   border-color: #ef4444;
 }
+
+.shared-dialog { margin: auto; color: var(--fg); box-sizing: border-box; border-radius: 16px; }
+.shared-dialog:not([open]) { display: none; }
+.shared-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+.shared-dialog > p { font-size: 13px; line-height: 1.5; }
+.shared-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+.shared-title { overflow-wrap: anywhere; }
+.shared-row .secondary { font-size: 12px; line-height: 1.6; }
+.shared-confirm { padding: 0 0 12px; font-size: 13px; }
+@media (max-width: 639px) {
+  .shared-dialog { margin: auto auto 0; border-radius: 16px 16px 0 0; }
+  .shared-row .sheet-item { align-items: flex-start; flex-wrap: wrap; }
+}

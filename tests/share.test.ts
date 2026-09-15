@@ -106,3 +106,97 @@ it("advertises sharing only when the cloud URL and a nonblank key are configured
   vi.stubEnv("ARTIFACTS_CLOUD_URL", "http://unsafe.example");
   expect(isSharingConfigured()).toBe(false);
 });
+
+it("tracks publication across revisions and updates the existing URL only on click", async () => {
+  const { sharingState } = await import("../src/share");
+  const first = await artifact();
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => init.method
+    ? Response.json(shared) : Response.json({ status: "active" }));
+  vi.stubGlobal("fetch", fetcher);
+  expect(sharingState(first).state).toBe("share");
+  await shareArtifact(first);
+  expect(sharingState(first)).toEqual({ state: "shared", url: shared.url });
+  fs.writeFileSync(path.join(project, "supplements/data.csv"), "updated supplement");
+  const next = (await submitArtifact({ target: project })).entry;
+  expect(sharingState(next).state).toBe("update");
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(await shareArtifact(next)).toEqual(shared);
+  expect(fetcher.mock.calls.at(-1)?.[0]).toBe(`https://api.example.com/v1/shares/${shared.id}`);
+  expect(fetcher.mock.calls.at(-1)?.[1].method).toBe("PUT");
+  expect(sharingState(next).state).toBe("shared");
+  // Navigating to an older revision must not offer to roll back the cloud copy.
+  expect(sharingState(first).state).toBe("shared");
+});
+
+it("keeps Update state after a failed publication", async () => {
+  const { sharingState } = await import("../src/share");
+  const first = await artifact();
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json(shared)));
+  await shareArtifact(first);
+  fs.writeFileSync(path.join(project, "index.html"), "<h1>Changed</h1>");
+  const next = (await submitArtifact({ target: project })).entry;
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => init.method === "PUT"
+    ? new Response(null, { status: 500 }) : Response.json({ status: "active" })));
+  await expect(shareArtifact(next)).rejects.toThrow();
+  expect(sharingState(next)).toEqual({ state: "update", url: shared.url });
+});
+
+it("adopts existing per-revision share caches without creating another URL", async () => {
+  const { createHash } = await import("node:crypto");
+  const { sharingState } = await import("../src/share");
+  const first = await artifact();
+  const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+  const oldScope = hash(JSON.stringify([root, first.id, first.contentHash, "https://api.example.com", hash("test-key")]));
+  fs.mkdirSync(path.join(root, "share-cache"));
+  fs.writeFileSync(path.join(root, "share-cache", `${oldScope}.json`), JSON.stringify(shared));
+  expect(sharingState(first)).toEqual({ state: "shared", url: shared.url });
+  fs.writeFileSync(path.join(project, "index.html"), "<h1>New revision</h1>");
+  const next = (await submitArtifact({ target: project })).entry;
+  expect(sharingState(next)).toEqual({ state: "update", url: shared.url });
+});
+
+it("sends artifact identity and revision without leaking local paths", async () => {
+  const entry = await artifact();
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+    const manifest = JSON.parse(String((init.body as FormData).get("manifest")));
+    expect(manifest.artifact).toEqual({ projectId: entry.projectId, slug: entry.slug, revision: entry.rev });
+    expect(JSON.stringify(manifest)).not.toContain(project);
+    return Response.json(shared);
+  }));
+  await shareArtifact(entry);
+});
+
+it("removal invalidates cached button state while retaining the local artifact", async () => {
+  const { removeSharedArtifact, sharingState } = await import("../src/share");
+  const entry = await artifact();
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => init.method === "DELETE"
+    ? new Response(null, { status: 204 }) : Response.json(shared)));
+  await shareArtifact(entry);
+  expect(sharingState(entry).state).toBe("shared");
+  await removeSharedArtifact(shared.id);
+  expect(sharingState(entry).state).toBe("share");
+  expect(fs.existsSync(path.join(project, "index.html"))).toBe(true);
+});
+
+it("backfills only cloud shares whose fingerprint matches the cached local snapshot", async () => {
+  const { listSharedArtifacts } = await import("../src/share");
+  const { createHash } = await import("node:crypto");
+  const entry = await artifact();
+  let fingerprint = "";
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+    const { artifact: _metadata, ...manifest } = JSON.parse(String((init.body as FormData).get("manifest")));
+    fingerprint = createHash("sha256").update(JSON.stringify(manifest)).digest("hex");
+    return Response.json(shared);
+  }));
+  await shareArtifact(entry);
+  const fetcher = vi.fn(async (_url: string, init: RequestInit) => init.method === "PATCH"
+    ? new Response(null, { status: 204 })
+    : Response.json({ shares: [{ ...shared, status: "active", artifact: null, fingerprint }], nextCursor: null }));
+  vi.stubGlobal("fetch", fetcher);
+  expect((await listSharedArtifacts()).shares[0]?.artifact?.revision).toBe(entry.rev);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  fingerprint = "mismatch";
+  fetcher.mockClear();
+  expect((await listSharedArtifacts()).shares[0]?.artifact).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});

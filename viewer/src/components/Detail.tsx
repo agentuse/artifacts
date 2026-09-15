@@ -108,6 +108,7 @@ export function Detail(props: {
         onBack={props.onBack}
         entry={entry}
         sharingEnabled={detail.sharingEnabled === true}
+        sharing={detail.sharing}
         menuOpen={menuOpen}
         onMenuOpenChange={setMenuOpen}
       />
@@ -158,6 +159,7 @@ function DetailHead(props: {
   onBack: () => void;
   entry?: FeedEntry;
   sharingEnabled?: boolean;
+  sharing?: { state: "share" | "shared" | "update"; url?: string };
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
 }) {
@@ -167,7 +169,7 @@ function DetailHead(props: {
         <ArrowLeft size={18} strokeWidth={1.75} />
       </button>
       <h1>{props.title}</h1>
-      {props.entry && props.sharingEnabled && <ShareButton key={props.entry.id} entryId={props.entry.id} />}
+      {props.entry && props.sharingEnabled && <ShareButton key={props.entry.id} entryId={props.entry.id} sharing={props.sharing} />}
       {props.entry && (
         <Actions
           entry={props.entry}

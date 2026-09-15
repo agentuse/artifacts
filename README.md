@@ -97,8 +97,10 @@ npx @agentuse/artifacts serve
 ```
 
 The upload key stays on the local server. The viewer never receives it. Sharing
-the same revision again reuses its active link; sharing another revision creates
-a new snapshot. Links and their management IDs are cached in the local storage
+the artifact shows **Share** before publishing, **Shared** when its revision is
+published, and **Update** when a newer local revision exists. Clicking Shared
+copies the link; clicking Update publishes to that same URL. Updates are never
+automatic. Older local revisions copy the current shared link without rolling it back. Links and their management IDs are cached in the local storage
 root's `share-cache/` directory. Revoked or expired links are replaced on the next
 share. The cloud backend is maintained separately in the private
 `agentuse-artifacts-cloud` repository.
@@ -193,3 +195,17 @@ npm run dev:viewer
 ## License
 
 [MIT](LICENSE) (c) 2026 Leon Ho.
+
+#### Manage shared artifacts
+
+Use the cloud icon beside the project-management button in the feed to open
+**Shared artifacts**. The list shows the current published revision and publication
+time, with actions to open, copy, or remove each share. Removing a share immediately
+disables its URL and resets the local Share button; it does not delete the local
+artifact. The API key stays on the local server.
+
+Uploads include the project ID, artifact slug, and local revision number. Opening
+the list backfills older shares only when a cached local snapshot matches the cloud
+bundle fingerprint. Pruned or unrecognized snapshots display “Revision unknown.”
+The cloud keeps only the latest published revision, with a one-hour grace period
+before scheduled cleanup removes superseded files.

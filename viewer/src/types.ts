@@ -38,6 +38,20 @@ export interface FeedPage {
 
 export interface EntryDetail {
   sharingEnabled?: boolean;
+  sharing?: { state: "share" | "shared" | "update"; url?: string };
   entry: FeedEntry;
   revisions: FeedEntry[];
+}
+
+export interface ManagedShare {
+  id: string;
+  url: string;
+  title: string;
+  status: string;
+  artifact: { projectId: string; slug: string; revision: number } | null;
+  publishedAt: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  files: number;
+  size: number;
 }

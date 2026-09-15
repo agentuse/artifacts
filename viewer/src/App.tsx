@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchFeed, feedQuery, type FeedFilter } from "./api";
 import { Feed, type FeedFilterState } from "./components/Feed";
 import { Detail } from "./components/Detail";
+import { SharesSheet } from "./components/SharesSheet";
 import { ProjectsSheet } from "./components/ProjectsSheet";
 import type { FeedEntry, FeedPage } from "./types";
 
@@ -42,6 +43,11 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sharesOpen, setSharesOpen] = useState(false);
+  const [sharingEnabled, setSharingEnabled] = useState(false);
+  useEffect(() => {
+    fetch("/api/sharing", { cache: "no-store" }).then(r => r.json()).then(value => setSharingEnabled(value.enabled === true)).catch(() => {});
+  }, []);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [notification, setNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -162,7 +168,9 @@ export function App() {
         onOpen={(entry) => navigate({ entryId: entry.id, filter: route.filter })}
         onLoadMore={onLoadMore}
         onOpenProjects={() => setProjectsOpen(true)}
+        onOpenShares={sharingEnabled ? () => setSharesOpen(true) : undefined}
       />
+      {sharesOpen && <SharesSheet onClose={() => setSharesOpen(false)} />}
       <ProjectsSheet
         open={projectsOpen}
         projects={page?.projects ?? []}

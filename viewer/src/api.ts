@@ -101,3 +101,14 @@ export async function shareEntry(id: string): Promise<{ id: string; url: string 
   }
   return { id: result.id, url: result.url };
 }
+
+const managementHeaders = { "content-type": "application/json", "x-artifacts-share": "1" };
+export async function fetchSharedArtifacts(cursor?: string): Promise<{ shares: import("./types").ManagedShare[]; nextCursor: string | null }> {
+  const response = await fetch(`/api/shares${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, { headers: managementHeaders, cache: "no-store" });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+}
+export async function removeSharedArtifact(id: string): Promise<void> {
+  const response = await fetch(`/api/shares/${encodeURIComponent(id)}`, { method: "DELETE", headers: managementHeaders });
+  if (!response.ok) throw new Error(await response.text());
+}

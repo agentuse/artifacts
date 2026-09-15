@@ -16,7 +16,7 @@ import {
 import { previewCacheDir, rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import { forgetProjectArtifacts, resolveBundleFile } from "./store.js";
-import { allowShareRequest, isSharingConfigured, shareArtifact, ShareError } from "./share.js";
+import { allowShareRequest, isSharingConfigured, listSharedArtifacts, removeSharedArtifact, sharingState, shareArtifact, ShareError } from "./share.js";
 
 export const DEFAULT_PORT = 7878;
 const HOST = "127.0.0.1";
@@ -258,6 +258,25 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   const url = new URL(req.url ?? "/", `http://${HOST}`);
   const pathname = url.pathname;
 
+  if (pathname === "/api/sharing" && req.method === "GET") {
+    sendJson(res, { enabled: isSharingConfigured() }, { "cache-control": "no-store" });
+    return;
+  }
+  const managedShare = /^\/api\/shares\/(shr_[a-f0-9]{32})$/.exec(pathname);
+  if ((pathname === "/api/shares" && req.method === "GET") || (managedShare && req.method === "DELETE")) {
+    if (!allowShareRequest(req)) { send(res, 403, "Share management requires the local viewer."); return; }
+    try {
+      if (managedShare) {
+        await removeSharedArtifact(managedShare[1]!);
+        res.writeHead(204, { "cache-control": "no-store" }); res.end();
+      } else sendJson(res, await listSharedArtifacts(url.searchParams.get("cursor") ?? undefined), { "cache-control": "no-store" });
+    } catch (error) {
+      send(res, error instanceof ShareError ? error.status : 500,
+        error instanceof ShareError ? error.message : "Could not manage shared artifacts. Please retry.");
+    }
+    return;
+  }
+
   const shareMatch = /^\/api\/entry\/([A-Za-z0-9_]+)\/share$/.exec(pathname);
   if (shareMatch && req.method === "POST") {
     if (!allowShareRequest(req)) {
@@ -303,21 +322,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       // Same conditional-request scheme as /api/feed: the detail view polls
       // this route to notice new revisions, and a 304 keeps that poll cheap.
       const sharingEnabled = isSharingConfigured();
-      const etag = etagOf(feedStamp(), entryMatch[1]!, String(sharingEnabled));
-      if (req.headers["if-none-match"] === etag) {
-        sendNotModified(res, etag, "no-store");
-        return;
-      }
       const entries = readFeedEntries();
       const entry = entries.find((e) => e.id === entryMatch[1]!);
       if (!entry) {
         send(res, 404, "not found");
         return;
       }
+      const sharing = sharingState(entry);
+      const etag = etagOf(feedStamp(), entry.id, String(sharingEnabled), JSON.stringify(sharing));
+      if (req.headers["if-none-match"] === etag) {
+        sendNotModified(res, etag, "no-store");
+        return;
+      }
       sendJson(res, {
         entry,
         revisions: feedEntryRevisions(entries, entry.projectId, entry.slug),
         sharingEnabled,
+        sharing,
       }, { etag });
     } catch (e) {
       send(res, 500, (e as Error).message);
