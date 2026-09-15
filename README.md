@@ -143,7 +143,7 @@ Every re-submit writes a new revision, so the store grows. `artifacts prune` kee
 **0.5.0 is a breaking upgrade from 0.3.x.** The unreleased 0.4.0 rewrite is included in this release. Source files are not deleted by the upgrade, but the new feed starts empty until you import or submit them.
 
 1. Back up `~/.agentuse/artifacts/` and your project-local artifact folders. Stop the old viewer before starting the new one. If PM2 or another service manager runs it, stop or restart that process through the manager rather than leaving the old server on port 7878.
-2. After 0.5.0 is published, install it with `npm install -g @agentuse/artifacts@0.5.0`.
+2. Install 0.5.0 with `npm install -g @agentuse/artifacts@0.5.0`.
 3. From each project root, import the legacy folder:
 
    ```bash

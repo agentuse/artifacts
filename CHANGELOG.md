@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 - Unreleased
+## 0.5.0 - 2026-09-15
 
 This is a breaking upgrade from 0.3.0. Version 0.4.0 was an unreleased development version; the changes below cover the entire transition from the last npm release.
 
