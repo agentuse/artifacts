@@ -1,10 +1,25 @@
 # Changelog
 
-## 0.4.0 - 2026-08-10
+## 0.5.0 - Unreleased
+
+This is a breaking upgrade from 0.3.0. Version 0.4.0 was an unreleased development version; the changes below cover the entire transition from the last npm release.
 
 A rewrite around one idea: an artifact reaches the viewer because an agent **submitted** it, not because a scanner found it.
 
+### Breaking changes from 0.3.0
+
+- Existing files do not appear until submitted or imported. The project registry and whole-project scanner are no longer used.
+- Existing `/p/:projectId/a/:name` links and the old local HTTP API are not compatible. New submissions return `/a/:entryId` links.
+- `init`, `list`, `project add`, `project prune`, and `url <target> --full` are removed. Update agent instructions and scripts before upgrading.
+- Source edits no longer change a displayed artifact automatically. Submit again to create a revision; use **Update** separately to publish that revision to an existing cloud link.
+- `project forget` deletes stored local copies as well as feed entries. It does not revoke cloud shares. Use Shared artifacts to remove those separately.
+
 ### Added
+
+- Optional cloud sharing with **Share**, **Shared**, and **Update** states. Updates retain the same URL, and successful copying displays a confirmation.
+- Shared-artifact management with authenticated listing, published revision metadata, copy/open actions, and cloud removal independent of local deletion.
+- Supplementary files in directory bundles, including CSV, TSV, text, Office documents, and ZIP files. Cloud downloads include the complete original bundle as a ZIP.
+- Cloud upload credentials remain on the local server. Sharing controls are hidden when configuration is missing. Local use does not require a cloud account or key.
 
 - `artifacts submit <path>` copies a file or a whole directory bundle into `~/.agentuse/artifacts/store/` and appends one line to an append-only feed log. Prints the artifact's URL. No setup step is needed.
 - `--title`, `--tag` (repeatable or comma-separated), and `--slug` on submit. Titles fall back to markdown frontmatter, the first heading, or the HTML `<title>`.
@@ -27,6 +42,10 @@ A rewrite around one idea: an artifact reaches the viewer because an agent **sub
 - **The project registry.** `manifest.json` is no longer read or written. Registering a project only mattered while a scanner needed to know where to look; a project is now simply whatever the feed reports. Gone with it: `artifacts init`, `artifacts project add`, `artifacts project prune`, the `--keep-artifacts` flag on `project forget`, and the `GET`/`POST /api/projects` and `POST /api/projects/prune` routes. The viewer's Projects sheet now lists projects by artifact count and only deletes.
 - The pan/zoom canvas, tile resizing, and persisted tile sizes.
 - `artifacts list`, `artifacts url <target> --full`, and the `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, and `/api/settings` routes.
+
+### Fixed
+
+- Preserve project identity when resubmitting imported legacy files and bundles outside Git repositories, so edits create revisions instead of duplicate artifacts.
 
 ### Upgrading
 

@@ -85,7 +85,8 @@ export async function submitArtifact(opts: SubmitOptions): Promise<SubmitResult>
   const entryRel = pickEntryFile(files, stat.isDirectory());
   const entryType = inferType(entryRel);
 
-  const project = resolveProject(opts.cwd ?? (stat.isDirectory() ? abs : path.dirname(abs)));
+  const sourceDir = stat.isDirectory() ? abs : path.dirname(abs);
+  const project = resolveProject(opts.cwd ?? legacyProjectRoot(sourceDir) ?? sourceDir);
   const slug = makeSlug(opts.slug ?? (stat.isDirectory() ? path.basename(abs) : stripExt(path.basename(abs))));
   const contentHash = hashBundle(files);
 
@@ -135,6 +136,15 @@ export async function submitArtifact(opts: SubmitOptions): Promise<SubmitResult>
 }
 
 /** One-shot migration: submit everything under <project>/.agentuse/artifacts/. */
+/** Keep edits to imported legacy artifacts in their original project, including outside Git. */
+function legacyProjectRoot(dir: string): string | undefined {
+  for (let current = dir; path.dirname(current) !== current; current = path.dirname(current)) {
+    if (path.basename(current) === "artifacts" && path.basename(path.dirname(current)) === ".agentuse") {
+      return path.dirname(path.dirname(current));
+    }
+  }
+}
+
 export async function importLocalArtifacts(cwd = process.cwd()): Promise<SubmitResult[]> {
   const project = resolveProject(cwd);
   const root = path.join(project.path, LOCAL_ARTIFACTS_REL);

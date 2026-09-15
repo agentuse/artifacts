@@ -17,7 +17,7 @@
 
 AI agents produce useful files, but those files end up buried in a transcript or scattered across a project. `@agentuse/artifacts` gives agents one command to publish a deliverable, and gives you one page to read everything they made.
 
-Version 0.4.0 replaces file discovery with an explicit submit step. An agent runs `artifacts submit <path>`; the CLI copies the file, or the whole directory, assets included, into a local store and appends one line to a feed log. The viewer is a reverse-chronological feed of those submissions, filterable by project and tag, and laid out for a phone first.
+Version 0.5.0 replaces file discovery with an explicit submit step. An agent runs `artifacts submit <path>`; the CLI copies the file, or the whole directory, assets included, into a local store and appends one line to a feed log. The viewer is a reverse-chronological feed of those submissions, filterable by project and tag, and laid out for a phone first.
 
 ## Install
 
@@ -114,7 +114,7 @@ also limits HTML/Markdown files to 2 MiB and displays static content: scripts an
 external CDN resources are blocked, so JavaScript dashboards may differ from the
 local viewer.
 
-## What 0.4.0 Changes
+## What 0.5.0 Changes from 0.3.0
 
 - **Submit replaces discovery.** Artifacts reach the feed because an agent submitted them, not because a scanner found them. No more whole-project filesystem walks on every poll.
 - **The viewer is a feed.** One reverse-chronological column, filter chips for project and tag, search, and a detail page per artifact. The pan/zoom canvas is gone.
@@ -140,11 +140,34 @@ Every re-submit writes a new revision, so the store grows. `artifacts prune` kee
 
 ### Migrating from 0.3.x
 
-Artifacts that lived in a project-local `.agentuse/artifacts/` folder are no longer discovered automatically. Publish them once per project:
+**0.5.0 is a breaking upgrade from 0.3.x.** The unreleased 0.4.0 rewrite is included in this release. Source files are not deleted by the upgrade, but the new feed starts empty until you import or submit them.
 
-```bash
-npx @agentuse/artifacts import
-```
+1. Back up `~/.agentuse/artifacts/` and your project-local artifact folders. Stop the old viewer before starting the new one. If PM2 or another service manager runs it, stop or restart that process through the manager rather than leaving the old server on port 7878.
+2. After 0.5.0 is published, install it with `npm install -g @agentuse/artifacts@0.5.0`.
+3. From each project root, import the legacy folder:
+
+   ```bash
+   artifacts import
+   ```
+
+   This reads only `.agentuse/artifacts/`. Files previously discovered elsewhere in the project need an explicit `artifacts submit <path>`. Import copies sources without deleting them. Each subdirectory must be a valid bundle with an entry file; resolve any import error and rerun. Unchanged imports are deduplicated.
+4. Update agent instructions to run `artifacts submit <path>` after writing a deliverable. Submit again after edits to create a new revision. Use a directory bundle to include relative assets and supplementary files.
+5. Start the updated viewer with `artifacts open`. Replace old bookmarks and scripts using the command and route mapping below.
+
+| 0.3.x behavior | 0.5.0 replacement |
+| --- | --- |
+| `init`, `project add`, project registry | No registration step; submit a file or bundle |
+| Automatic filesystem discovery and refresh | `submit <path>` after creating or editing an artifact |
+| `list` | `feed`, optionally `--all-revisions` |
+| `url <target> --full`, `/p/:projectId/a/:name` | Use the `/a/:entryId` URL returned by `submit` |
+| `url` / `open` | Project-filtered feed; `url --all` prints the full feed URL |
+| `project prune` | No registry to prune; `prune --keep N` removes stored revisions |
+| `project forget --keep-artifacts` | Removed; `project forget` deletes local stored copies and feed entries |
+| Scanner settings and `/api/manifest`, `/api/artifact/*`, `/api/render/*`, `/api/settings` | Removed; migrate integrations to the documented CLI JSON output |
+
+The old `manifest.json` is not migrated or read by 0.5.0. Keep it in your backup if you need to return to 0.3.x. Downgrading does not make the 0.5.0 feed available to the old viewer. Linked git worktrees now have separate project identities.
+
+Cloud sharing is optional and requires a separately configured backend. Anyone with a share URL can view that artifact; a link is not a user login. Changes remain local until **Update** is clicked. Remove cloud copies through **Shared artifacts**, independently of local pruning or project removal.
 
 ## CLI
 

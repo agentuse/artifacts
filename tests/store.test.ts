@@ -290,4 +290,17 @@ describe("importLocalArtifacts", () => {
   it("fails clearly when there is nothing to import", async () => {
     await expect(importLocalArtifacts(project)).rejects.toThrow(/no artifacts directory/i);
   });
+
+  it("preserves imported project identity when resubmitting legacy files and bundles outside Git", async () => {
+    write(project, ".agentuse/artifacts/notes.md", "# Notes");
+    write(project, ".agentuse/artifacts/dash/index.html", "<h1>Dashboard</h1>");
+    const imported = await importLocalArtifacts(project);
+    write(project, ".agentuse/artifacts/notes.md", "# Updated notes");
+    write(project, ".agentuse/artifacts/dash/index.html", "<h1>Updated dashboard</h1>");
+    for (const target of ["notes.md", "dash"]) {
+      const next = await submitArtifact({ target: path.join(project, ".agentuse/artifacts", target) });
+      expect(next.entry.rev).toBe(2);
+      expect(next.entry.projectId).toBe(imported.find(r => r.entry.slug === next.entry.slug)!.entry.projectId);
+    }
+  });
 });
