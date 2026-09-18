@@ -296,11 +296,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
   // /api/feed -> newest-first page plus project/tag facets for the chips.
   if (pathname === "/api/feed" && req.method === "GET") {
     try {
-      const etag = etagOf(feedStamp(), url.search);
-      if (req.headers["if-none-match"] === etag) {
-        sendNotModified(res, etag, "no-store");
-        return;
-      }
       const page = queryFeed({
         projectId: url.searchParams.get("project") ?? undefined,
         tag: url.searchParams.get("tag") ?? undefined,
@@ -308,7 +303,24 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         limit: numberParam(url.searchParams.get("limit")),
         cursor: numberParam(url.searchParams.get("cursor")),
       });
-      sendJson(res, page, { etag });
+      const sharingEnabled = isSharingConfigured();
+      const entries = page.entries.map((entry) => ({
+        ...entry,
+        cloudShared: sharingEnabled && sharingState(entry).state !== "share",
+      }));
+      // A cloud share can be created or revoked without changing the append-only
+      // feed. Include the card-level share state so polling does not incorrectly
+      // return 304 after that status changes.
+      const etag = etagOf(
+        feedStamp(),
+        url.search,
+        entries.map((entry) => `${entry.id}:${entry.cloudShared}`).join(","),
+      );
+      if (req.headers["if-none-match"] === etag) {
+        sendNotModified(res, etag, "no-store");
+        return;
+      }
+      sendJson(res, { ...page, entries }, { etag });
     } catch (e) {
       send(res, 500, (e as Error).message);
     }

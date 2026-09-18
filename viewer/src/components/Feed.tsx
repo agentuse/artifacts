@@ -172,6 +172,11 @@ function Card(props: {
 
   return (
     <article className="card" ref={ref}>
+      {entry.cloudShared && (
+        <span className="card-cloud" role="img" aria-label="Shared to cloud" title="Shared to cloud">
+          <Cloud size={15} strokeWidth={1.9} />
+        </span>
+      )}
       <button type="button" className="card-hit" onClick={props.onOpen}>
         {hasThumbnail && (
           <div className={"card-preview " + entry.type}>
@@ -179,7 +184,7 @@ function Card(props: {
             <span className="card-type">{typeLabel(entry.type)}</span>
           </div>
         )}
-        <h2 className="card-title">{entry.title}</h2>
+        <h2 className={"card-title" + (entry.cloudShared && !hasThumbnail ? " with-cloud" : "")}>{entry.title}</h2>
         {!hasThumbnail && seen && <ArtifactPreview entry={entry} width={640} />}
       </button>
       <div className="card-sub">

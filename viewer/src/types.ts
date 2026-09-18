@@ -26,6 +26,8 @@ export interface FeedEntry {
   submittedAt: string;
   naturalWidth?: number;
   naturalHeight?: number;
+  /** A published cloud copy exists, including when this revision needs an update. */
+  cloudShared?: boolean;
 }
 
 export interface FeedPage {
