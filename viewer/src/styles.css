@@ -466,19 +466,14 @@ button, input { font: inherit; color: inherit; }
 .feed-message.error { color: #ef4444; }
 .feed-message .mono { display: block; margin-top: 6px; }
 
-/* Hide-on-scroll-down headers (useAutoHide). Phone widths only: on a desktop
-   the header is a small share of the screen and moving it is just noise. */
+/* Hide-on-scroll-down feed header (useAutoHide). Phone widths only: on a
+   desktop the header is a small share of the screen and moving it is noise. */
 @media (max-width: 799px) {
-  .feed-head,
-  .detail-top {
-    transition: transform 220ms cubic-bezier(0.2, 0, 0, 1), margin-bottom 220ms cubic-bezier(0.2, 0, 0, 1);
+  .feed-head {
+    transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
     will-change: transform;
   }
-  .feed-head.auto-hidden,
-  .detail-top.auto-hidden { transform: translateY(-100%); }
-  /* The page doesn't scroll here, so sliding away isn't enough: give the
-     space to the artifact too. */
-  .detail.inner-scroll .detail-top.auto-hidden { margin-bottom: calc(-1 * var(--top-h, 0px)); }
+  .feed-head.auto-hidden { transform: translateY(-100%); }
 }
 
 /* Sidebar (desktop) */
@@ -609,15 +604,30 @@ button, input { font: inherit; color: inherit; }
   min-height: 100dvh;
 }
 
-/* The sticky, auto-hiding block: the title bar alone when the page scrolls,
-   the title bar plus chips and revisions when the artifact scrolls inside its
-   iframe (.inner-scroll). */
 .detail-top {
   position: sticky;
   top: 0;
   z-index: 20;
   background: var(--bg);
 }
+
+/* Full screen: no title bar, chips or revisions, just the artifact and one
+   floating way back. Translucent so it hides as little of the artifact as a
+   44px touch target can. */
+.exit-fullscreen {
+  position: fixed;
+  z-index: 30;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: calc(env(safe-area-inset-right, 0px) + 10px);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  color: var(--fg);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-float);
+}
+.exit-fullscreen:hover { color: var(--fg); background: var(--bg); }
 
 .detail-head {
   display: flex;

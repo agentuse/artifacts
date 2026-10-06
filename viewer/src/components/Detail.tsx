@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, Copy, Download, FileText, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, FileText, Maximize2, Minimize2, MoreHorizontal } from "lucide-react";
 import { bundleUrl, fetchEntry, latestTarget, rawUrl, targetPath, type EntryTarget } from "../api";
 import { ArtifactBody, isTextEntry, typeLabel } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import { ShareButton } from "./ShareButton";
-import { useAutoHide } from "../useAutoHide";
 import type { EntryDetail, FeedEntry } from "../types";
 
 const POLL_MS = 5_000;
@@ -20,38 +19,11 @@ export function Detail(props: {
   // Owned here, not inside Actions, so Escape can dismiss the menu without
   // also leaving the page — both listeners see the same keydown.
   const [menuOpen, setMenuOpen] = useState(false);
-  // HTML and PDF scroll inside their iframe, so the page itself never moves:
-  // the header block (title bar, chips, revisions) collapses to give the
-  // artifact the space. Everything else scrolls the window, where only the
-  // title bar is sticky and it slides out over the content.
-  const innerScroll = detail?.entry.type === "html" || detail?.entry.type === "pdf";
-  const { hidden: topHidden, report } = useAutoHide({ trackWindow: !innerScroll, paused: menuOpen });
-  const topRef = useRef<HTMLDivElement>(null);
-  const loaded = detail !== null;
-
-  // The artifact iframe is an opaque origin; its runtime shim posts
-  // `agentuse:scroll` with its scroll position. Only that iframe is trusted
-  // as the source, and only a number is read.
-  useEffect(() => {
-    if (!innerScroll) return;
-    const onMessage = (e: MessageEvent) => {
-      const frame = document.querySelector<HTMLIFrameElement>(".detail .body iframe");
-      if (!frame || e.source !== frame.contentWindow) return;
-      const data = e.data as { type?: unknown; y?: unknown } | null;
-      if (data?.type === "agentuse:scroll" && typeof data.y === "number") report(data.y);
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [innerScroll, report]);
-
-  // Collapsing needs the block's height as a CSS value (margin can't use %).
-  useEffect(() => {
-    const node = topRef.current;
-    if (!node || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => node.style.setProperty("--top-h", `${node.offsetHeight}px`));
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [loaded, innerScroll]);
+  // Full screen hides the title bar, chips and revisions so the artifact gets
+  // the whole screen. An explicit toggle, not hide-on-scroll: an HTML artifact
+  // scrolls inside its iframe in any direction (wide tables, dashboards), and
+  // guessing intent from that kept hiding the header at the wrong moment.
+  const [fullscreen, setFullscreen] = useState(false);
   // Ref so the poll effect doesn't restart when the parent re-renders and
   // hands down a fresh callback identity.
   const onOpenTargetRef = useRef(props.onOpenTarget);
@@ -109,11 +81,15 @@ export function Detail(props: {
         setMenuOpen(false);
         return;
       }
+      if (fullscreen) {
+        setFullscreen(false);
+        return;
+      }
       onBack();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen, onBack]);
+  }, [menuOpen, fullscreen, onBack]);
 
   if (error) {
     return (
@@ -147,6 +123,10 @@ export function Detail(props: {
         sharing={detail.sharing}
         menuOpen={menuOpen}
         onMenuOpenChange={setMenuOpen}
+        onFullscreen={() => {
+          setMenuOpen(false);
+          setFullscreen(true);
+        }}
       />
   );
   const meta = (
@@ -190,20 +170,24 @@ export function Detail(props: {
       )}
     </>
   );
-  const topClass = "detail-top" + (topHidden ? " auto-hidden" : "");
+  // Every slot stays in place whether or not it renders, so toggling full
+  // screen never remounts ArtifactBody: an iframe would reload and lose its
+  // scroll position.
   return (
-    <div className={"detail" + (innerScroll ? " inner-scroll" : "")}>
-      {innerScroll ? (
-        <div className={topClass} ref={topRef}>
-          {head}
-          {meta}
-        </div>
-      ) : (
-        <>
-          <div className={topClass} ref={topRef}>{head}</div>
-          {meta}
-        </>
-      )}
+    <div className={"detail" + (fullscreen ? " fullscreen" : "")}>
+      {fullscreen ? null : <div className="detail-top">{head}</div>}
+      {fullscreen ? null : meta}
+      {fullscreen ? (
+        <button
+          type="button"
+          className="icon-btn exit-fullscreen"
+          onClick={() => setFullscreen(false)}
+          aria-label="Exit full screen"
+          title="Exit full screen (esc)"
+        >
+          <Minimize2 size={18} strokeWidth={1.75} />
+        </button>
+      ) : null}
       <ArtifactBody entry={entry} />
     </div>
   );
@@ -217,6 +201,7 @@ function DetailHead(props: {
   sharing?: { state: "share" | "shared" | "update"; url?: string };
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
+  onFullscreen?: () => void;
 }) {
   return (
     <header className="detail-head">
@@ -225,6 +210,11 @@ function DetailHead(props: {
       </button>
       <h1>{props.title}</h1>
       {props.entry && props.sharingEnabled && <ShareButton key={props.entry.id} entryId={props.entry.id} sharing={props.sharing} />}
+      {props.onFullscreen && (
+        <button type="button" className="icon-btn" onClick={props.onFullscreen} aria-label="Full screen" title="Full screen">
+          <Maximize2 size={18} strokeWidth={1.75} />
+        </button>
+      )}
       {props.entry && (
         <Actions
           entry={props.entry}
