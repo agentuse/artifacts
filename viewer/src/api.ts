@@ -101,12 +101,6 @@ export async function fetchText(url: string): Promise<string> {
   return res.text();
 }
 
-/** Delete every artifact submitted from a project, feed lines and bundles. */
-export async function removeProject(projectId: string): Promise<void> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(await res.text());
-}
-
 export async function shareEntry(id: string): Promise<{ id: string; url: string }> {
   const response = await fetch(`/api/entry/${encodeURIComponent(id)}/share`, {
     method: "POST",

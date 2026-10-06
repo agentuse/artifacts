@@ -768,26 +768,6 @@ button, input { font: inherit; color: inherit; }
   font-size: 0.82em;
 }
 
-.app-notice {
-  position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 14px);
-  left: 50%;
-  z-index: 420;
-  max-width: min(520px, calc(100vw - 32px));
-  transform: translateX(-50%);
-  padding: 10px 14px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  background: var(--tile-bg);
-  color: var(--fg);
-  box-shadow: var(--shadow-float);
-  font-size: 13px;
-  line-height: 1.4;
-  pointer-events: none;
-}
-.app-notice.error {
-  border-color: #ef4444;
-}
 
 .shared-dialog { margin: auto; color: var(--fg); box-sizing: border-box; border-radius: 16px; }
 .shared-dialog:not([open]) { display: none; }

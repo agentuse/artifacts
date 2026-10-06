@@ -15,7 +15,7 @@ import {
 } from "./feed.js";
 import { previewCacheDir, rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
-import { forgetProjectArtifacts, resolveBundleFile } from "./store.js";
+import { resolveBundleFile } from "./store.js";
 import { allowShareRequest, isSharingConfigured, listSharedArtifacts, removeSharedArtifact, sharingState, shareArtifact, ShareError, syncSharedArtifacts } from "./share.js";
 
 export const DEFAULT_PORT = 7878;
@@ -457,22 +457,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       );
     } catch (e) {
       send(res, 500, (e as Error).message);
-    }
-    return;
-  }
-
-  // /api/projects/{projectId} DELETE -> drop every artifact from that project.
-  // There is no project registry: the viewer lists whatever the feed reports,
-  // so this is artifact management, not deregistration.
-  const deleteProjectMatch = /^\/api\/projects\/([^/]+)$/.exec(pathname);
-  if (deleteProjectMatch && req.method === "DELETE") {
-    try {
-      const projectId = decodeURIComponent(deleteProjectMatch[1]!);
-      const droppedArtifacts = await forgetProjectArtifacts(projectId);
-      sendJson(res, { projectId, droppedArtifacts });
-    } catch (e) {
-      const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
-      send(res, code, (e as Error).message);
     }
     return;
   }

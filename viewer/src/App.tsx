@@ -3,7 +3,6 @@ import { fetchFeed, feedQuery, latestTarget, targetPath, type EntryTarget, type 
 import { Feed, type FeedFilterState } from "./components/Feed";
 import { Detail } from "./components/Detail";
 import { SharesSheet } from "./components/SharesSheet";
-import { ProjectsSheet } from "./components/ProjectsSheet";
 import type { FeedEntry, FeedPage } from "./types";
 
 const POLL_MS = 5_000;
@@ -54,9 +53,6 @@ export function App() {
   useEffect(() => {
     fetch("/api/sharing", { cache: "no-store" }).then(r => r.json()).then(value => setSharingEnabled(value.enabled === true)).catch(() => {});
   }, []);
-  const [projectsOpen, setProjectsOpen] = useState(false);
-  const [notification, setNotification] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
   const etagRef = useRef<string | null>(null);
 
   const navigate = useCallback((next: Route, replace = false) => {
@@ -73,11 +69,6 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  useEffect(() => {
-    if (!notification) return;
-    const id = window.setTimeout(() => setNotification(null), 3600);
-    return () => window.clearTimeout(id);
-  }, [notification]);
 
   const filterKey = feedQuery(route.filter as FeedFilter);
 
@@ -111,7 +102,7 @@ export function App() {
       window.clearInterval(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, reloadKey]);
+  }, [filterKey]);
 
   const onLoadMore = useCallback(async () => {
     const last = pages[pages.length - 1];
@@ -156,7 +147,6 @@ export function App() {
           onOpenTarget={(detail) => navigate({ detail, filter: route.filter }, true)}
           onFilter={(filter) => navigate({ filter })}
         />
-        <Notice notification={notification} />
       </div>
     );
   }
@@ -173,35 +163,10 @@ export function App() {
         onFilterChange={(filter) => navigate({ filter })}
         onOpen={(entry) => navigate({ detail: latestTarget(entry), filter: route.filter })}
         onLoadMore={onLoadMore}
-        onOpenProjects={() => setProjectsOpen(true)}
         onOpenShares={sharingEnabled ? () => setSharesOpen(true) : undefined}
       />
       {sharesOpen && <SharesSheet onClose={() => setSharesOpen(false)} />}
-      <ProjectsSheet
-        open={projectsOpen}
-        projects={page?.projects ?? []}
-        onClose={() => setProjectsOpen(false)}
-        onChanged={(deletedProjectId) => {
-          // Refetch now rather than waiting out the poll, and drop a filter
-          // that no longer matches anything.
-          etagRef.current = null;
-          if (route.filter.projectId === deletedProjectId) {
-            navigate({ filter: { ...route.filter, projectId: undefined } });
-          }
-          setReloadKey((k) => k + 1);
-        }}
-        onNotify={(type, text) => setNotification({ type, text })}
-      />
-      <Notice notification={notification} />
     </div>
   );
 }
 
-function Notice(props: { notification: { type: "success" | "error"; text: string } | null }) {
-  if (!props.notification) return null;
-  return (
-    <div className={`app-notice ${props.notification.type}`} role="status">
-      {props.notification.text}
-    </div>
-  );
-}

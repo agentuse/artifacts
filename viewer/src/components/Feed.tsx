@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderCog, Search, X, Cloud } from "lucide-react";
+import { Search, X, Cloud } from "lucide-react";
 import { ArtifactPreview, isImageEntry, typeLabel } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import type { FeedEntry, FeedPage } from "../types";
@@ -20,7 +20,6 @@ export function Feed(props: {
   onFilterChange: (next: FeedFilterState) => void;
   onOpen: (entry: FeedEntry) => void;
   onLoadMore: () => void;
-  onOpenProjects: () => void;
   onOpenShares?: () => void;
 }) {
   const { page, entries, filter } = props;
@@ -33,15 +32,6 @@ export function Feed(props: {
           <h1>Artifacts</h1>
           <div className="shared-actions">
           {props.onOpenShares && <button type="button" className="icon-btn" onClick={props.onOpenShares} aria-label="Shared artifacts" title="Shared artifacts"><Cloud size={18} strokeWidth={1.75} /></button>}
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={props.onOpenProjects}
-            aria-label="manage projects"
-            title="manage projects"
-          >
-            <FolderCog size={18} strokeWidth={1.75} />
-          </button>
           </div>
         </div>
         <SearchBox value={filter.q ?? ""} onChange={(q) => props.onFilterChange({ ...filter, q: q || undefined })} />
