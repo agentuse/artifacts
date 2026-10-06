@@ -39,10 +39,12 @@ export function ShareButton({ entryId, sharing }: { entryId: string; sharing?: S
   const label = busy ? state === "update" ? "Updating…" : "Sharing…" : copied ? "Link copied" : state === "shared" ? "Shared" : state === "update" ? "Update" : "Share";
   return (
     <div className="share-control">
-      <button type="button" className="share-button" onClick={share} disabled={busy}
+      <button type="button" className={`share-button state-${copied ? "shared" : state}`} onClick={share} disabled={busy} aria-label={label}
         title={state === "shared" ? "Copy shared link" : state === "update" ? "Publish this revision to the existing shared link" : "Anyone with the link can view this artifact and its supplementary files"}>
         {state === "shared" ? <Check size={15} /> : state === "update" ? <RefreshCw size={15} /> : <Share2 size={15} />}
-        <span>{label}</span>
+        {/* The word hides at phone widths, where the header row is tight; the
+            icon and colour carry the state and aria-label names it. */}
+        <span className="share-label" aria-hidden="true">{label}</span>
       </button>
       <span className="sr-only" role="status">{busy ? "Uploading artifact" : copied ? "Share link copied to clipboard" : ""}</span>
       {fallback && <div className="share-feedback" role="status">

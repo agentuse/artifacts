@@ -23,6 +23,8 @@
   --shadow-tile: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px -12px rgba(0,0,0,0.12);
   --shadow-float: 0 12px 32px -12px rgba(0,0,0,0.22);
   --focus-ring: 0 0 0 3px var(--accent-ring);
+  --warn: #b45309;
+  --warn-soft: rgba(180, 83, 9, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -40,6 +42,8 @@
     --pane-bg-elev: #111113;
     --shadow-tile: 0 1px 0 rgba(255,255,255,0.02), 0 8px 24px -12px rgba(0,0,0,0.7);
     --shadow-float: 0 12px 32px -12px rgba(0,0,0,0.7);
+    --warn: #f59e0b;
+    --warn-soft: rgba(245, 158, 11, 0.10);
   }
 }
 
@@ -428,13 +432,6 @@ button, input { font: inherit; color: inherit; }
   text-overflow: ellipsis;
 }
 
-.detail-sub, .revisions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 16px 14px;
-}
 .ago, .rev, .badge {
   color: var(--muted);
   font-size: 12px;
@@ -595,6 +592,62 @@ button, input { font: inherit; color: inherit; }
 .filter-option.checked { font-weight: 600; }
 .filter-option.checked .mono { color: var(--accent); font-weight: 400; }
 
+/* Details sheet (revisions and info) */
+.details-heading {
+  margin: 16px 0 6px;
+  padding: 0;
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.details-sheet .filter-option .ago {
+  min-width: 56px;
+  text-align: right;
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-weight: 400;
+}
+.badge-latest {
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  font-weight: 500;
+}
+.badge-shared {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-weight: 400;
+}
+.details-info { display: flex; flex-direction: column; gap: 10px; padding-bottom: 8px; }
+.details-project {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+.details-project svg { flex-shrink: 0; color: var(--muted); }
+.details-project span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.details-link { color: var(--accent); font-size: 14px; }
+.details-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.details-tags .chip { min-height: 40px; padding: 0 14px; }
+.details-facts { margin: 0; font-size: 12px; }
+
 /* ----- Detail ----- */
 
 .detail {
@@ -629,18 +682,42 @@ button, input { font: inherit; color: inherit; }
 }
 .exit-fullscreen:hover { color: var(--fg); background: var(--bg); }
 
+/* One row: back, title block, share, full screen, more. Everything that used
+   to sit in rows below it (project, tags, size, revisions) is in the details
+   sheet the title block opens. */
 .detail-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: calc(env(safe-area-inset-top, 0px) + 6px) 10px 6px;
+  gap: 2px;
+  padding: calc(env(safe-area-inset-top, 0px) + 6px) 6px 6px 4px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
-.detail-head h1 {
+.detail-title {
   flex: 1;
   min-width: 0;
   margin: 0;
+  font-size: inherit;
+}
+.detail-title button {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  min-height: 48px;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.detail-title button:hover { background: var(--pane-bg-elev); }
+.detail-title-text,
+.detail-title.plain {
+  max-width: 100%;
   font-size: 16px;
   font-weight: 650;
   letter-spacing: -0.015em;
@@ -648,16 +725,53 @@ button, input { font: inherit; color: inherit; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.detail-title.plain { padding: 0 6px; }
+.detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-weight: 400;
+}
+.detail-meta .ago { font-size: inherit; }
+.detail-meta svg { flex-shrink: 0; }
+.rev-old { color: var(--warn); }
+/* Project and tags join the meta line only where the row has room. */
+.detail-meta-wide { display: none; }
 
-.detail-sub, .revisions { padding: 10px 16px; }
+.old-rev-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 14px;
+}
+.old-rev-banner span { flex: 1; color: var(--fg); }
+.old-rev-banner .link-btn {
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
 .share-control { position: relative; flex-shrink: 0; }
 .share-button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
 .share-button:disabled { cursor: wait; opacity: 0.6; }
+.share-button.state-shared { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .share-feedback { position: absolute; top: calc(100% + 8px); right: 0; width: min(320px, calc(100vw - 64px)); padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); box-shadow: 0 8px 30px #0002; font-size: 13px; line-height: 1.5; }
 .share-feedback p { margin: 0 0 8px; }
 .share-feedback input { width: 100%; box-sizing: border-box; padding: 8px; background: var(--bg); color: inherit; border: 1px solid var(--border); border-radius: 4px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-.revisions { padding-top: 0; }
 
 /* The body fills whatever is left below the sticky header. A percentage
    height on the iframe does not resolve inside a flex item, so the iframe
@@ -723,6 +837,51 @@ button, input { font: inherit; color: inherit; }
   cursor: pointer;
 }
 .action-menu-item:hover { background: var(--pane-bg-elev); color: var(--accent); }
+.action-menu-item.accent { color: var(--accent); }
+.action-menu-title { display: none; }
+.action-menu-hint {
+  margin-left: auto;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-family: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+}
+
+@media (min-width: 800px) {
+  .detail-meta-wide { display: inline-flex; align-items: center; gap: 8px; }
+}
+
+@media (max-width: 799px) {
+  /* The share control shrinks to its icon; colour and aria-label carry the state. */
+  .share-label { display: none; }
+  .share-button { min-width: 44px; padding: 0; justify-content: center; border-color: transparent; background: none; }
+  .share-button.state-shared { border-color: transparent; background: none; }
+
+  /* The actions menu becomes a bottom sheet with full-size rows. */
+  .action-menu-panel {
+    position: fixed;
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    padding: 8px;
+    border-radius: 16px;
+    animation: sheet-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .action-menu-item { min-height: 52px; gap: 14px; font-size: 15px; }
+  .action-menu-title {
+    display: block;
+    padding: 6px 10px 10px;
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
 
 /* ----- Sheets ----- */
 

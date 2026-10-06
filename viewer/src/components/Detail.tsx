@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, Copy, Download, FileText, Maximize2, Minimize2, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Cloud, Copy, Download, FileText, History, Link, Maximize2, Minimize2, MoreHorizontal } from "lucide-react";
 import { bundleUrl, fetchEntry, latestTarget, rawUrl, targetPath, type EntryTarget } from "../api";
-import { ArtifactBody, isTextEntry, typeLabel } from "./Render";
+import { ArtifactBody, isTextEntry } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import { ShareButton } from "./ShareButton";
+import { DetailsSheet } from "./DetailsSheet";
 import type { EntryDetail, FeedEntry } from "../types";
 
 const POLL_MS = 5_000;
@@ -24,6 +25,7 @@ export function Detail(props: {
   // scrolls inside its iframe in any direction (wide tables, dashboards), and
   // guessing intent from that kept hiding the header at the wrong moment.
   const [fullscreen, setFullscreen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   // Ref so the poll effect doesn't restart when the parent re-renders and
   // hands down a fresh callback identity.
   const onOpenTargetRef = useRef(props.onOpenTarget);
@@ -77,6 +79,8 @@ export function Detail(props: {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // The details sheet is a modal <dialog>: Escape closes it natively.
+      if (detailsOpen) return;
       if (menuOpen) {
         setMenuOpen(false);
         return;
@@ -89,7 +93,7 @@ export function Detail(props: {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen, fullscreen, onBack]);
+  }, [menuOpen, fullscreen, detailsOpen, onBack]);
 
   if (error) {
     return (
@@ -114,69 +118,53 @@ export function Detail(props: {
   }
 
   const { entry, revisions } = detail;
-  const head = (
-      <DetailHead
-        title={entry.title}
-        onBack={props.onBack}
-        entry={entry}
-        sharingEnabled={detail.sharingEnabled === true}
-        sharing={detail.sharing}
-        menuOpen={menuOpen}
-        onMenuOpenChange={setMenuOpen}
-        onFullscreen={() => {
-          setMenuOpen(false);
-          setFullscreen(true);
-        }}
-      />
-  );
-  const meta = (
-    <>
-      <div className="detail-sub">
-        {/* Chips look tappable, so they are: both jump to the filtered feed. */}
-        <button
-          type="button"
-          className="chip small"
-          onClick={() => props.onFilter({ projectId: entry.projectId })}
-        >
-          {entry.projectName}
-        </button>
-        {entry.tags.map((tag) => (
-          <button
-            key={tag}
-            type="button"
-            className="chip small tag"
-            onClick={() => props.onFilter({ tag })}
-          >
-            #{tag}
-          </button>
-        ))}
-        <span className="badge">{typeLabel(entry.type)}</span>
-        <RelativeTime iso={entry.submittedAt} />
-        <span className="secondary">{fmtSize(entry.size)}{entry.files > 1 ? ` · ${entry.files} files` : ""}</span>
-      </div>
-      {revisions.length > 1 && (
-        <div className="revisions" aria-label="revisions">
-          {revisions.map((rev) => (
-            <button
-              key={rev.id}
-              type="button"
-              className={"chip small" + (rev.id === entry.id ? " active" : "")}
-              onClick={() => props.onOpenTarget(rev.id === revisions[0]?.id ? latestTarget(rev) : { kind: "entry", id: rev.id })}
-            >
-              rev {rev.rev}
-            </button>
-          ))}
-        </div>
-      )}
-    </>
-  );
+  const latest = revisions[0] ?? entry;
+  const isLatest = latest.id === entry.id;
+  const openRevision = (rev: FeedEntry) =>
+    props.onOpenTarget(rev.id === latest.id ? latestTarget(rev) : { kind: "entry", id: rev.id });
+  // With share sync on, the cloud link always serves the newest revision once
+  // it says "shared"; "update" means a push is still pending.
+  const latestShared = detail.sharingEnabled === true && detail.sharing?.state === "shared";
+
   // Every slot stays in place whether or not it renders, so toggling full
   // screen never remounts ArtifactBody: an iframe would reload and lose its
   // scroll position.
   return (
     <div className={"detail" + (fullscreen ? " fullscreen" : "")}>
-      {fullscreen ? null : <div className="detail-top">{head}</div>}
-      {fullscreen ? null : meta}
+      {fullscreen ? null : (
+        <div className="detail-top">
+          <DetailHead
+            title={entry.title}
+            onBack={props.onBack}
+            entry={entry}
+            revLabel={isLatest ? `rev ${entry.rev}` : `rev ${entry.rev} of ${latest.rev}`}
+            isLatest={isLatest}
+            onDetails={() => {
+              setMenuOpen(false);
+              setDetailsOpen(true);
+            }}
+            sharingEnabled={detail.sharingEnabled === true}
+            sharing={detail.sharing}
+            menuOpen={menuOpen}
+            onMenuOpenChange={setMenuOpen}
+            onFullscreen={() => {
+              setMenuOpen(false);
+              setFullscreen(true);
+            }}
+          />
+          {!isLatest && (
+            // An older revision is frozen; the permalink isn't. Say so, since
+            // links now follow the newest revision everywhere else.
+            <div className="old-rev-banner" role="status">
+              <History size={16} strokeWidth={1.75} aria-hidden="true" />
+              <span>Older revision. It won't update.</span>
+              <button type="button" className="link-btn" onClick={() => openRevision(latest)}>
+                Go to latest
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {fullscreen ? (
         <button
           type="button"
@@ -189,6 +177,19 @@ export function Detail(props: {
         </button>
       ) : null}
       <ArtifactBody entry={entry} />
+      {detailsOpen ? (
+        <DetailsSheet
+          entry={entry}
+          revisions={revisions}
+          latestShared={latestShared}
+          onOpenRevision={(rev) => {
+            setDetailsOpen(false);
+            openRevision(rev);
+          }}
+          onFilter={props.onFilter}
+          onClose={() => setDetailsOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -197,19 +198,50 @@ function DetailHead(props: {
   title: string;
   onBack: () => void;
   entry?: FeedEntry;
+  revLabel?: string;
+  isLatest?: boolean;
+  onDetails?: () => void;
   sharingEnabled?: boolean;
   sharing?: { state: "share" | "shared" | "update"; url?: string };
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
   onFullscreen?: () => void;
 }) {
+  const { entry } = props;
   return (
     <header className="detail-head">
       <button type="button" className="icon-btn" onClick={props.onBack} aria-label="back to feed" title="back (esc)">
         <ArrowLeft size={18} strokeWidth={1.75} />
       </button>
-      <h1>{props.title}</h1>
-      {props.entry && props.sharingEnabled && <ShareButton key={props.entry.id} entryId={props.entry.id} sharing={props.sharing} />}
+      {entry && props.onDetails ? (
+        // The title block is the way into revisions and details, so the
+        // whole two-line block is one 48px target.
+        <h1 className="detail-title">
+          <button
+            type="button"
+            onClick={props.onDetails}
+            aria-label={`${props.title}, ${props.revLabel ?? ""}. Show revisions and details`}
+          >
+            <span className="detail-title-text">{props.title}</span>
+            <span className="detail-meta">
+              <span className={props.isLatest ? undefined : "rev-old"}>{props.revLabel}</span>
+              <ChevronDown size={12} strokeWidth={2} aria-hidden="true" />
+              <span aria-hidden="true">·</span>
+              <RelativeTime iso={entry.submittedAt} />
+              <span className="detail-meta-wide">
+                <span aria-hidden="true">·</span>
+                <span>{entry.projectName}</span>
+                {entry.tags.map((tag) => (
+                  <span key={tag}>#{tag}</span>
+                ))}
+              </span>
+            </span>
+          </button>
+        </h1>
+      ) : (
+        <h1 className="detail-title plain">{props.title}</h1>
+      )}
+      {entry && props.sharingEnabled && <ShareButton key={entry.id} entryId={entry.id} sharing={props.sharing} />}
       {props.onFullscreen && (
         <button type="button" className="icon-btn" onClick={props.onFullscreen} aria-label="Full screen" title="Full screen">
           <Maximize2 size={18} strokeWidth={1.75} />
@@ -218,6 +250,8 @@ function DetailHead(props: {
       {props.entry && (
         <Actions
           entry={props.entry}
+          isLatest={props.isLatest !== false}
+          sharedUrl={props.sharingEnabled && props.sharing?.state !== "share" ? props.sharing?.url : undefined}
           open={!!props.menuOpen}
           onOpenChange={props.onMenuOpenChange ?? (() => {})}
         />
@@ -226,14 +260,20 @@ function DetailHead(props: {
   );
 }
 
-type CopyState = null | "path" | "content" | "link";
+type CopyState = null | "path" | "content" | "link" | "shared";
 
 /**
  * Download and "copy content" go through /api/raw/:id so they hand back the
  * exact file the agent submitted — notably the original, unsanitized HTML
  * rather than what the iframe renders.
  */
-function Actions(props: { entry: FeedEntry; open: boolean; onOpenChange: (open: boolean) => void }) {
+function Actions(props: {
+  entry: FeedEntry;
+  isLatest: boolean;
+  sharedUrl?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const { open, onOpenChange } = props;
   const [copied, setCopied] = useState<CopyState>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -282,15 +322,19 @@ function Actions(props: { entry: FeedEntry; open: boolean; onOpenChange: (open: 
         {copied ? <Check size={18} strokeWidth={2} /> : <MoreHorizontal size={18} strokeWidth={2} />}
       </button>
       {open && (
-        <div className="action-menu-panel" role="menu">
+        <div className="action-menu-panel" role="menu" aria-label="More actions">
+          <div className="action-menu-title" aria-hidden="true">
+            {props.entry.title} · rev {props.entry.rev}
+          </div>
           <button
             type="button"
             role="menuitem"
             className="action-menu-item"
             onClick={() => copy("link", () => window.location.href)}
           >
-            <Copy size={14} strokeWidth={2} />
+            <Link size={14} strokeWidth={2} />
             <span>Copy link</span>
+            <span className="action-menu-hint">{props.isLatest ? "always latest" : `rev ${props.entry.rev} only`}</span>
           </button>
           <button
             type="button"
@@ -328,6 +372,7 @@ function Actions(props: { entry: FeedEntry; open: boolean; onOpenChange: (open: 
           >
             <Download size={14} strokeWidth={2} />
             <span>Download</span>
+            <span className="action-menu-hint">{filename}</span>
           </a>
           <a
             role="menuitem"
@@ -340,14 +385,20 @@ function Actions(props: { entry: FeedEntry; open: boolean; onOpenChange: (open: 
             <FileText size={14} strokeWidth={2} />
             <span>Open standalone</span>
           </a>
+          {props.sharedUrl ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="action-menu-item accent"
+              onClick={() => copy("shared", () => props.sharedUrl ?? "")}
+            >
+              <Cloud size={14} strokeWidth={2} />
+              <span>Copy shared link</span>
+            </button>
+          ) : null}
         </div>
       )}
     </div>
   );
 }
 
-function fmtSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
