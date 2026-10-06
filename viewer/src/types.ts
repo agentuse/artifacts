@@ -36,6 +36,8 @@ export interface FeedPage {
   total: number;
   projects: Array<{ projectId: string; projectName: string; count: number }>;
   tags: Array<{ tag: string; count: number }>;
+  all: number;
+  facetTotals: { projects: number; tags: number };
 }
 
 export interface EntryDetail {

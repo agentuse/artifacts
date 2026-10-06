@@ -141,15 +141,34 @@ describe("queryFeed", () => {
     expect(queryFeed({ q: "beta" }).entries.map((e) => e.id)).toEqual(["b"]);
   });
 
-  it("reports facets over the whole set, not the filtered slice", () => {
+  it("counts each facet over the other filters, never its own", () => {
     seed([
       entry({ id: "a", slug: "one", tags: ["ops"] }),
       entry({ id: "b", slug: "two", projectId: "proj_b", projectName: "beta", tags: ["ops"] }),
     ]);
     const page = queryFeed({ projectId: "proj_b" });
     expect(page.entries).toHaveLength(1);
+    // The project list ignores the project filter, so switching stays one tap.
     expect(page.projects.map((p) => p.projectId).sort()).toEqual(["proj_a", "proj_b"]);
-    expect(page.tags).toEqual([{ tag: "ops", count: 2 }]);
+    // Tags narrow to the chosen project.
+    expect(page.tags).toEqual([{ tag: "ops", count: 1 }]);
+    expect(page.all).toBe(2);
+    expect(page.facetTotals).toEqual({ projects: 2, tags: 1 });
+  });
+
+  it("narrows projects by tag and keeps a selection that no longer matches", () => {
+    seed([
+      entry({ id: "a", slug: "one", tags: ["ops"] }),
+      entry({ id: "b", slug: "two", projectId: "proj_b", projectName: "beta", tags: ["design"] }),
+    ]);
+    const byTag = queryFeed({ tag: "design" });
+    expect(byTag.projects).toEqual([{ projectId: "proj_b", projectName: "beta", count: 1 }]);
+    expect(byTag.tags.map((t) => t.tag).sort()).toEqual(["design", "ops"]);
+
+    const stale = queryFeed({ projectId: "proj_a", tag: "design" });
+    expect(stale.entries).toHaveLength(0);
+    expect(stale.tags).toContainEqual({ tag: "design", count: 0 });
+    expect(stale.projects).toContainEqual({ projectId: "proj_a", projectName: expect.any(String), count: 0 });
   });
 
   it("pages with a cursor", () => {

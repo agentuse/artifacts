@@ -48,6 +48,10 @@ export interface FeedPage {
   total: number;
   projects: Array<{ projectId: string; projectName: string; count: number }>;
   tags: Array<{ tag: string; count: number }>;
+  /** Every artifact, before any filter. */
+  all: number;
+  /** What each facet counted: the "All projects" / "Any tag" figures. */
+  facetTotals: { projects: number; tags: number };
 }
 
 const MAX_TAGS = 12;
@@ -189,17 +193,26 @@ export function nextRevision(entries: FeedEntry[], projectId: string, slug: stri
 }
 
 /**
- * Newest-first page plus the facet counts the viewer's filter chips need.
- * Facets are computed over the whole (deduped, project/tag-unfiltered) set so
- * the chips don't disappear as you filter.
+ * Newest-first page plus the facet counts the viewer's filters need.
+ * Each facet counts the entries matching every OTHER filter (and the search),
+ * never its own: choosing a project narrows the tags to that project's, while
+ * the other projects stay listed so switching is one tap. A selected value is
+ * always kept, at count 0 if need be, so it can still be cleared.
  */
 export function queryFeed(query: FeedQuery = {}): FeedPage {
   const all = readFeedEntries();
   const visible = query.allRevisions ? all : latestPerSlug(all);
   visible.sort(compareNewestFirst);
 
-  const projects = countProjects(visible);
-  const tags = countTags(visible);
+  const projectBase = visible.filter((e) => matches(e, { ...query, projectId: undefined }));
+  const tagBase = visible.filter((e) => matches(e, { ...query, tag: undefined }));
+  const projects = countProjects(projectBase);
+  const tags = countTags(tagBase);
+  if (query.projectId && !projects.some((p) => p.projectId === query.projectId)) {
+    const named = visible.find((e) => e.projectId === query.projectId);
+    if (named) projects.push({ projectId: named.projectId, projectName: named.projectName, count: 0 });
+  }
+  if (query.tag && !tags.some((t) => t.tag === query.tag)) tags.push({ tag: query.tag, count: 0 });
 
   const filtered = visible.filter((e) => matches(e, query));
   const limit = clampLimit(query.limit);
@@ -207,7 +220,15 @@ export function queryFeed(query: FeedQuery = {}): FeedPage {
   const page = filtered.slice(start, start + limit);
   const nextCursor = start + limit < filtered.length ? start + limit : null;
 
-  return { entries: page, nextCursor, total: filtered.length, projects, tags };
+  return {
+    entries: page,
+    nextCursor,
+    total: filtered.length,
+    projects,
+    tags,
+    all: visible.length,
+    facetTotals: { projects: projectBase.length, tags: tagBase.length },
+  };
 }
 
 function clampLimit(limit: number | undefined): number {

@@ -32,8 +32,7 @@ export function Feed(props: {
   const { page, entries, filter } = props;
   const [sheet, setSheet] = useState<FilterKind | null>(null);
   const hasFilter = !!(filter.projectId || filter.tag || filter.q);
-  // Facets are computed over the whole feed, so their sum is the unfiltered count.
-  const allCount = page?.projects.reduce((sum, p) => sum + p.count, 0) ?? 0;
+  const allCount = page?.all ?? 0;
   const projectName = page?.projects.find((p) => p.projectId === filter.projectId)?.projectName;
   const setProject = (projectId?: string) => props.onFilterChange({ ...filter, projectId });
   const setTag = (tag?: string) => props.onFilterChange({ ...filter, tag });
@@ -90,7 +89,7 @@ export function Feed(props: {
 
       <div className="feed-body">
         {page && (
-          <SideFilters page={page} filter={filter} allCount={allCount} onProject={setProject} onTag={setTag} />
+          <SideFilters page={page} filter={filter} onProject={setProject} onTag={setTag} />
         )}
 
         <main className="feed-main">
@@ -141,7 +140,7 @@ export function Feed(props: {
               ? page.projects.map((p) => ({ value: p.projectId, label: p.projectName, count: p.count }))
               : page.tags.map((t) => ({ value: t.tag, label: `#${t.tag}`, count: t.count }))
           }
-          allCount={allCount}
+          allCount={sheet === "project" ? page.facetTotals.projects : page.facetTotals.tags}
           selected={sheet === "project" ? filter.projectId : filter.tag}
           onSelect={(value) => {
             if (sheet === "project") setProject(value);
@@ -159,7 +158,6 @@ export function Feed(props: {
 function SideFilters(props: {
   page: FeedPage;
   filter: FeedFilterState;
-  allCount: number;
   onProject: (projectId?: string) => void;
   onTag: (tag?: string) => void;
 }) {
@@ -180,7 +178,7 @@ function SideFilters(props: {
           onClick={() => props.onProject(undefined)}
         >
           <span>All projects</span>
-          <span className="mono">{props.allCount}</span>
+          <span className="mono">{page.facetTotals.projects}</span>
         </button>
         {projects.map((p) => (
           <button
