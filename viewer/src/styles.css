@@ -466,6 +466,21 @@ button, input { font: inherit; color: inherit; }
 .feed-message.error { color: #ef4444; }
 .feed-message .mono { display: block; margin-top: 6px; }
 
+/* Hide-on-scroll-down headers (useAutoHide). Phone widths only: on a desktop
+   the header is a small share of the screen and moving it is just noise. */
+@media (max-width: 799px) {
+  .feed-head,
+  .detail-top {
+    transition: transform 220ms cubic-bezier(0.2, 0, 0, 1), margin-bottom 220ms cubic-bezier(0.2, 0, 0, 1);
+    will-change: transform;
+  }
+  .feed-head.auto-hidden,
+  .detail-top.auto-hidden { transform: translateY(-100%); }
+  /* The page doesn't scroll here, so sliding away isn't enough: give the
+     space to the artifact too. */
+  .detail.inner-scroll .detail-top.auto-hidden { margin-bottom: calc(-1 * var(--top-h, 0px)); }
+}
+
 /* Sidebar (desktop) */
 .feed-side section { display: flex; flex-direction: column; gap: 2px; }
 .feed-side section + section { margin-top: 28px; }
@@ -594,10 +609,17 @@ button, input { font: inherit; color: inherit; }
   min-height: 100dvh;
 }
 
-.detail-head {
+/* The sticky, auto-hiding block: the title bar alone when the page scrolls,
+   the title bar plus chips and revisions when the artifact scrolls inside its
+   iframe (.inner-scroll). */
+.detail-top {
   position: sticky;
   top: 0;
   z-index: 20;
+  background: var(--bg);
+}
+
+.detail-head {
   display: flex;
   align-items: center;
   gap: 8px;

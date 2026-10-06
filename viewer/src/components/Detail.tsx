@@ -4,6 +4,7 @@ import { bundleUrl, fetchEntry, latestTarget, rawUrl, targetPath, type EntryTarg
 import { ArtifactBody, isTextEntry, typeLabel } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import { ShareButton } from "./ShareButton";
+import { useAutoHide } from "../useAutoHide";
 import type { EntryDetail, FeedEntry } from "../types";
 
 const POLL_MS = 5_000;
@@ -19,6 +20,38 @@ export function Detail(props: {
   // Owned here, not inside Actions, so Escape can dismiss the menu without
   // also leaving the page — both listeners see the same keydown.
   const [menuOpen, setMenuOpen] = useState(false);
+  // HTML and PDF scroll inside their iframe, so the page itself never moves:
+  // the header block (title bar, chips, revisions) collapses to give the
+  // artifact the space. Everything else scrolls the window, where only the
+  // title bar is sticky and it slides out over the content.
+  const innerScroll = detail?.entry.type === "html" || detail?.entry.type === "pdf";
+  const { hidden: topHidden, report } = useAutoHide({ trackWindow: !innerScroll, paused: menuOpen });
+  const topRef = useRef<HTMLDivElement>(null);
+  const loaded = detail !== null;
+
+  // The artifact iframe is an opaque origin; its runtime shim posts
+  // `agentuse:scroll` with its scroll position. Only that iframe is trusted
+  // as the source, and only a number is read.
+  useEffect(() => {
+    if (!innerScroll) return;
+    const onMessage = (e: MessageEvent) => {
+      const frame = document.querySelector<HTMLIFrameElement>(".detail .body iframe");
+      if (!frame || e.source !== frame.contentWindow) return;
+      const data = e.data as { type?: unknown; y?: unknown } | null;
+      if (data?.type === "agentuse:scroll" && typeof data.y === "number") report(data.y);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [innerScroll, report]);
+
+  // Collapsing needs the block's height as a CSS value (margin can't use %).
+  useEffect(() => {
+    const node = topRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => node.style.setProperty("--top-h", `${node.offsetHeight}px`));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loaded, innerScroll]);
   // Ref so the poll effect doesn't restart when the parent re-renders and
   // hands down a fresh callback identity.
   const onOpenTargetRef = useRef(props.onOpenTarget);
@@ -105,8 +138,7 @@ export function Detail(props: {
   }
 
   const { entry, revisions } = detail;
-  return (
-    <div className="detail">
+  const head = (
       <DetailHead
         title={entry.title}
         onBack={props.onBack}
@@ -116,6 +148,9 @@ export function Detail(props: {
         menuOpen={menuOpen}
         onMenuOpenChange={setMenuOpen}
       />
+  );
+  const meta = (
+    <>
       <div className="detail-sub">
         {/* Chips look tappable, so they are: both jump to the filtered feed. */}
         <button
@@ -152,6 +187,22 @@ export function Detail(props: {
             </button>
           ))}
         </div>
+      )}
+    </>
+  );
+  const topClass = "detail-top" + (topHidden ? " auto-hidden" : "");
+  return (
+    <div className={"detail" + (innerScroll ? " inner-scroll" : "")}>
+      {innerScroll ? (
+        <div className={topClass} ref={topRef}>
+          {head}
+          {meta}
+        </div>
+      ) : (
+        <>
+          <div className={topClass} ref={topRef}>{head}</div>
+          {meta}
+        </>
       )}
       <ArtifactBody entry={entry} />
     </div>

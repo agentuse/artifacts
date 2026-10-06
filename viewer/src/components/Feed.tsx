@@ -3,6 +3,7 @@ import { ChevronDown, Cloud, Folder, Hash, Search, X } from "lucide-react";
 import { ArtifactPreview, isImageEntry, typeLabel } from "./Render";
 import { FilterSheet, type FilterKind } from "./FilterSheet";
 import { RelativeTime } from "./RelativeTime";
+import { useAutoHide } from "../useAutoHide";
 import type { FeedEntry, FeedPage } from "../types";
 
 export interface FeedFilterState {
@@ -31,6 +32,7 @@ export function Feed(props: {
 }) {
   const { page, entries, filter } = props;
   const [sheet, setSheet] = useState<FilterKind | null>(null);
+  const { hidden: headHidden } = useAutoHide({ trackWindow: true, paused: sheet !== null });
   const hasFilter = !!(filter.projectId || filter.tag || filter.q);
   const allCount = page?.all ?? 0;
   const projectName = page?.projects.find((p) => p.projectId === filter.projectId)?.projectName;
@@ -39,7 +41,7 @@ export function Feed(props: {
 
   return (
     <div className="feed">
-      <header className="feed-head">
+      <header className={"feed-head" + (headHidden ? " auto-hidden" : "")}>
         <div className="feed-head-row">
           <div className="feed-title">
             <h1>Artifacts</h1>
