@@ -39,7 +39,7 @@ Inside the package checkout, use `npm run dev -- <command>`. Most commands accep
    npx @agentuse/artifacts submit tmp/q2-market-analysis --tag research --tag q2
    ```
 
-   `submit` prints the artifact's URL. There is no setup step.
+   `submit` prints the artifact's URL. It is a permalink that always opens the newest revision, so re-submitting (a dashboard, a living report) never needs a new link. There is no setup step.
 
 3. **Give the user the URL** that `submit` printed. If the viewer is not running yet, start it once:
 

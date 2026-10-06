@@ -17,18 +17,10 @@ export function viewerFeedUrl(
 }
 
 export function viewerEntryUrl(loc: ViewerLocation, entryId: string): string {
-  return `http://127.0.0.1:${loc.port}${entryPath(entryId)}`;
+  return `http://127.0.0.1:${loc.port}/a/${encodeURIComponent(entryId)}`;
 }
 
 /** A permalink that always opens the newest revision of one artifact. */
 export function viewerLatestUrl(loc: ViewerLocation, projectId: string, slug: string): string {
-  return `http://127.0.0.1:${loc.port}${latestPath(projectId, slug)}`;
-}
-
-export function entryPath(entryId: string): string {
-  return `/a/${encodeURIComponent(entryId)}`;
-}
-
-export function latestPath(projectId: string, slug: string): string {
-  return `/latest/${encodeURIComponent(projectId)}/${encodeURIComponent(slug)}`;
+  return `http://127.0.0.1:${loc.port}/latest/${encodeURIComponent(projectId)}/${encodeURIComponent(slug)}`;
 }

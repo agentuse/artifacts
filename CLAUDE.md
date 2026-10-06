@@ -99,8 +99,8 @@ Routes:
 - `GET /api/preview/:entryId?w=` -> cached WebP thumbnail for image entries. 400 for non-images.
 - `GET /api/raw/:entryId` -> the entry file exactly as submitted, `application/octet-stream` + `Content-Disposition: attachment` (powers Download / Copy content; never rendered inline).
 - `DELETE /api/projects/:id` -> drop every feed entry and stored bundle for that project. This is the only project route; there is no registry to list, add to, or prune.
-- `GET /latest/:projectId/:slug` -> 302 to `/a/<newest entry id>`, `no-store`. The permalink for an artifact that keeps being re-submitted (a dashboard): `/a/:id` names one immutable revision, this names the artifact. `submit` prints it as `latest:` (`latestUrl` in `--json`), and the viewer's "Copy link" copies it ("Copy link to rev N" copies the revision).
-- Everything else falls back to `viewer-dist/index.html` for SPA routes (`/`, `/a/:entryId`).
+- `GET /api/latest/:projectId/:slug` -> the same payload and ETag scheme as `/api/entry/:id`, for whichever revision is newest. Backs the viewer's `/latest/:projectId/:slug` permalink route.
+- Everything else falls back to `viewer-dist/index.html` for SPA routes (`/`, `/latest/:projectId/:slug`, `/a/:entryId`).
 
 There is no `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, `/api/settings`, or `GET`/`POST /api/projects` any more. They belonged to the scanner and the registry it needed.
 
@@ -136,7 +136,7 @@ When modifying sanitization: do not switch to regex; do not relax `connect-src` 
 
 ### Viewer SPA (`viewer/src/`)
 
-- React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `routePath` over `window.location` in `App.tsx`. Two routes only: `/` (feed) and `/a/:entryId` (detail). Filter state lives in the query string (`?project=&tag=&q=`) so a filtered feed is linkable and survives reload.
+- React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `routePath` over `window.location` in `App.tsx`. Routes: `/` (feed), `/latest/:projectId/:slug` (the newest revision of an artifact), and `/a/:entryId` (one specific older revision). The newest revision is always shown at `/latest/...`, so the address bar holds the permalink and "Copy link" (which copies `location.href`) hands out a link that keeps working as the artifact is re-submitted: feed cards and the newest revision chip open it, and an `/a/:id` that turns out to be the newest is swapped for it on load. A `/latest` page follows new revisions on its own because the server resolves it on every poll. `submit` prints the permalink as `url` (`revisionUrl` in `--json` is the `/a/:id` one). Filter state lives in the query string (`?project=&tag=&q=`) so a filtered feed is linkable and survives reload.
 - Files: `App.tsx` (routing + polling + pagination), `components/Feed.tsx` (header, chips, cards), `components/Detail.tsx` (header, actions, revisions), `components/Render.tsx` (all artifact bodies and card previews), `components/ProjectsSheet.tsx`, `components/RelativeTime.tsx`, `frontmatter.ts`.
 - The feed polls `/api/feed` every 5s with an `if-none-match`; a 304 costs one request and no re-render. When the log *does* change, pagination resets to page one, new artifacts belong at the top, and splicing them into a scrolled list reads as a jump.
 - **Card previews are lazy and mount once.** `useSeen` (IntersectionObserver, 400px rootMargin) gates them, and the flag never flips back, so scrolling away doesn't tear down a rendered preview. Without this a long feed mounts one iframe per HTML card at once. Note when screenshotting: `Page.captureScreenshot` with `captureBeyondViewport` does not paint off-screen iframes, so a blank card in a full-page capture is usually the capture, not a bug, scroll it into the viewport and take a normal shot.

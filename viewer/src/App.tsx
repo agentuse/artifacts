@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchFeed, feedQuery, type FeedFilter } from "./api";
+import { fetchFeed, feedQuery, latestTarget, targetPath, type EntryTarget, type FeedFilter } from "./api";
 import { Feed, type FeedFilterState } from "./components/Feed";
 import { Detail } from "./components/Detail";
 import { SharesSheet } from "./components/SharesSheet";
@@ -9,16 +9,22 @@ import type { FeedEntry, FeedPage } from "./types";
 const POLL_MS = 5_000;
 
 interface Route {
-  entryId?: string;
+  detail?: EntryTarget;
   filter: FeedFilterState;
 }
 
 function parseRoute(href: string): Route {
   const url = new URL(href);
   const parts = url.pathname.split("/").filter(Boolean);
-  const entryId = parts[0] === "a" && parts[1] ? decodeURIComponent(parts[1]) : undefined;
+  let detail: EntryTarget | undefined;
+  try {
+    if (parts[0] === "a" && parts[1]) detail = { kind: "entry", id: decodeURIComponent(parts[1]) };
+    if (parts[0] === "latest" && parts[1] && parts[2]) {
+      detail = { kind: "latest", projectId: decodeURIComponent(parts[1]), slug: decodeURIComponent(parts[2]) };
+    }
+  } catch { /* A malformed link falls back to the feed. */ }
   return {
-    entryId,
+    detail,
     filter: {
       projectId: url.searchParams.get("project") ?? undefined,
       tag: url.searchParams.get("tag") ?? undefined,
@@ -28,7 +34,7 @@ function parseRoute(href: string): Route {
 }
 
 function routePath(route: Route): string {
-  const base = route.entryId ? `/a/${encodeURIComponent(route.entryId)}` : "/";
+  const base = route.detail ? targetPath(route.detail) : "/";
   const params = new URLSearchParams();
   if (route.filter.projectId) params.set("project", route.filter.projectId);
   if (route.filter.tag) params.set("tag", route.filter.tag);
@@ -141,14 +147,14 @@ export function App() {
     return { ...first, nextCursor: pages[pages.length - 1]!.nextCursor };
   }, [pages]);
 
-  if (route.entryId) {
+  if (route.detail) {
     return (
       <div className="app">
         <Detail
-          entryId={route.entryId}
-          onBack={() => navigate({ entryId: undefined, filter: route.filter })}
-          onOpenEntry={(entryId) => navigate({ entryId, filter: route.filter }, true)}
-          onFilter={(filter) => navigate({ entryId: undefined, filter })}
+          target={route.detail}
+          onBack={() => navigate({ filter: route.filter })}
+          onOpenTarget={(detail) => navigate({ detail, filter: route.filter }, true)}
+          onFilter={(filter) => navigate({ filter })}
         />
         <Notice notification={notification} />
       </div>
@@ -164,8 +170,8 @@ export function App() {
         loading={loading}
         loadingMore={loadingMore}
         error={error}
-        onFilterChange={(filter) => navigate({ entryId: undefined, filter })}
-        onOpen={(entry) => navigate({ entryId: entry.id, filter: route.filter })}
+        onFilterChange={(filter) => navigate({ filter })}
+        onOpen={(entry) => navigate({ detail: latestTarget(entry), filter: route.filter })}
         onLoadMore={onLoadMore}
         onOpenProjects={() => setProjectsOpen(true)}
         onOpenShares={sharingEnabled ? () => setSharesOpen(true) : undefined}
@@ -180,7 +186,7 @@ export function App() {
           // that no longer matches anything.
           etagRef.current = null;
           if (route.filter.projectId === deletedProjectId) {
-            navigate({ entryId: undefined, filter: { ...route.filter, projectId: undefined } });
+            navigate({ filter: { ...route.filter, projectId: undefined } });
           }
           setReloadKey((k) => k + 1);
         }}

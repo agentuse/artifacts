@@ -95,14 +95,15 @@ export async function runCli(argv: string[]): Promise<void> {
           tags: Array.isArray(opts.tag) ? opts.tag : typeof opts.tag === "string" ? [opts.tag] : [],
           slug: typeof opts.slug === "string" ? opts.slug : undefined,
         });
-        const url = viewerEntryUrl({ port: currentPort() }, result.entry.id);
+        // The permalink, not the revision link: it is what someone bookmarks,
+        // and it keeps working as the artifact is re-submitted.
+        const url = viewerLatestUrl({ port: currentPort() }, result.entry.projectId, result.entry.slug);
+        const revisionUrl = viewerEntryUrl({ port: currentPort() }, result.entry.id);
         if (opts.open && !global.json) openBrowser(url);
-        const latestUrl = viewerLatestUrl({ port: currentPort() }, result.entry.projectId, result.entry.slug);
-        emit(global.json, { ...result, url, latestUrl }, () => {
+        emit(global.json, { ...result, url, revisionUrl }, () => {
           const what = result.deduped ? "unchanged" : `rev ${result.entry.rev}`;
           human(`✓ ${result.entry.title} (${what})`);
           human(`  ${url}`);
-          human(`  latest: ${latestUrl}`);
         });
       } catch (e) {
         fail(global.json, e);

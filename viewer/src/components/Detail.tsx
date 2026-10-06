@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Check, Copy, Download, FileText, MoreHorizontal } from "lucide-react";
-import { bundleUrl, fetchEntry, rawUrl } from "../api";
+import { bundleUrl, fetchEntry, latestTarget, rawUrl, targetPath, type EntryTarget } from "../api";
 import { ArtifactBody, isTextEntry, typeLabel } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import { ShareButton } from "./ShareButton";
@@ -9,9 +9,9 @@ import type { EntryDetail, FeedEntry } from "../types";
 const POLL_MS = 5_000;
 
 export function Detail(props: {
-  entryId: string;
+  target: EntryTarget;
   onBack: () => void;
-  onOpenEntry: (entryId: string) => void;
+  onOpenTarget: (target: EntryTarget) => void;
   onFilter: (filter: { projectId?: string; tag?: string }) => void;
 }) {
   const [detail, setDetail] = useState<EntryDetail | null>(null);
@@ -21,34 +21,36 @@ export function Detail(props: {
   const [menuOpen, setMenuOpen] = useState(false);
   // Ref so the poll effect doesn't restart when the parent re-renders and
   // hands down a fresh callback identity.
-  const onOpenEntryRef = useRef(props.onOpenEntry);
-  onOpenEntryRef.current = props.onOpenEntry;
+  const onOpenTargetRef = useRef(props.onOpenTarget);
+  onOpenTargetRef.current = props.onOpenTarget;
+  const targetKey = targetPath(props.target);
 
-  // Poll like the feed does: a 304 costs one conditional request. When a new
-  // revision lands while the user is on the latest one, follow it — that is
-  // what "staying on the artifact" means. A deliberately opened older
-  // revision is left alone.
+  // Poll like the feed does: a 304 costs one conditional request. A "latest"
+  // target follows new revisions by itself, since the server resolves it on
+  // every poll. An /a/:id link that turns out to be the newest revision is
+  // swapped for the permalink, so the address bar always holds the link that
+  // stays current. A deliberately opened older revision is left alone.
   useEffect(() => {
     let alive = true;
     let etag: string | null = null;
-    let wasLatest: boolean | null = null;
+    let loaded = false;
     setDetail(null);
     setError(null);
 
     const tick = async () => {
-      const first = wasLatest === null;
+      const first = !loaded;
       try {
-        const result = await fetchEntry(props.entryId, etag);
+        const result = await fetchEntry(props.target, etag);
         if (!alive) return;
         etag = result.etag;
         if (result.notModified || !result.detail) return;
         const next = result.detail;
-        const newest = next.revisions[0];
-        if (wasLatest === null) wasLatest = !newest || newest.rev <= next.entry.rev;
-        setDetail(next);
-        if (wasLatest && newest && newest.rev > next.entry.rev) {
-          onOpenEntryRef.current(newest.id);
+        loaded = true;
+        if (first && props.target.kind === "entry" && next.revisions[0]?.id === next.entry.id) {
+          onOpenTargetRef.current(latestTarget(next.entry));
+          return;
         }
+        setDetail(next);
       } catch (e) {
         // Only the initial load surfaces an error; a transient poll failure
         // shouldn't replace a page the user is reading.
@@ -62,7 +64,9 @@ export function Detail(props: {
       alive = false;
       window.clearInterval(id);
     };
-  }, [props.entryId]);
+    // targetKey stands in for props.target, whose identity changes every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetKey]);
 
   const onBack = props.onBack;
   useEffect(() => {
@@ -142,7 +146,7 @@ export function Detail(props: {
               key={rev.id}
               type="button"
               className={"chip small" + (rev.id === entry.id ? " active" : "")}
-              onClick={() => props.onOpenEntry(rev.id)}
+              onClick={() => props.onOpenTarget(rev.id === revisions[0]?.id ? latestTarget(rev) : { kind: "entry", id: rev.id })}
             >
               rev {rev.rev}
             </button>
@@ -182,11 +186,6 @@ function DetailHead(props: {
 }
 
 type CopyState = null | "path" | "content" | "link";
-
-/** Opens whatever revision is newest when followed; mirrors the server's /latest route. */
-function latestLink(entry: FeedEntry): string {
-  return `${window.location.origin}/latest/${encodeURIComponent(entry.projectId)}/${encodeURIComponent(entry.slug)}`;
-}
 
 /**
  * Download and "copy content" go through /api/raw/:id so they hand back the
@@ -247,19 +246,10 @@ function Actions(props: { entry: FeedEntry; open: boolean; onOpenChange: (open: 
             type="button"
             role="menuitem"
             className="action-menu-item"
-            onClick={() => copy("link", () => latestLink(props.entry))}
-          >
-            <Copy size={14} strokeWidth={2} />
-            <span>Copy link</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="action-menu-item"
             onClick={() => copy("link", () => window.location.href)}
           >
             <Copy size={14} strokeWidth={2} />
-            <span>Copy link to rev {props.entry.rev}</span>
+            <span>Copy link</span>
           </button>
           <button
             type="button"

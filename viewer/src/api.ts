@@ -46,8 +46,27 @@ export interface EntryFetchResult {
   notModified: boolean;
 }
 
-export async function fetchEntry(id: string, etag?: string | null): Promise<EntryFetchResult> {
-  const res = await fetch(`/api/entry/${encodeURIComponent(id)}`, {
+/**
+ * What a detail page shows: one immutable revision, or whichever revision of
+ * an artifact is newest. The newest revision is always shown via "latest", so
+ * the address bar holds the permalink and copying it hands out a link that
+ * keeps working as the artifact is re-submitted.
+ */
+export type EntryTarget = { kind: "entry"; id: string } | { kind: "latest"; projectId: string; slug: string };
+
+export function latestTarget(entry: FeedEntry): EntryTarget {
+  return { kind: "latest", projectId: entry.projectId, slug: entry.slug };
+}
+
+export function targetPath(target: EntryTarget): string {
+  return target.kind === "entry"
+    ? `/a/${encodeURIComponent(target.id)}`
+    : `/latest/${encodeURIComponent(target.projectId)}/${encodeURIComponent(target.slug)}`;
+}
+
+export async function fetchEntry(target: EntryTarget, etag?: string | null): Promise<EntryFetchResult> {
+  const api = target.kind === "entry" ? `/api/entry/${encodeURIComponent(target.id)}` : `/api${targetPath(target)}`;
+  const res = await fetch(api, {
     cache: "no-store",
     headers: etag ? { "if-none-match": etag } : undefined,
   });
