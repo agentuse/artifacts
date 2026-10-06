@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 - 2026-10-05
+
+### Added
+
+- **Permalinks that follow the newest revision.** `/p/:projectId/:slug` always shows an artifact's latest revision, and it is now the address feed cards open and "Copy link" hands out. `submit` prints it as `url`; the specific-revision `/a/:entryId` link moves to `revisionUrl` in `--json`. New `GET /api/latest/:projectId/:slug` route backs it.
+- Shared artifacts update themselves: while `serve` runs, a new revision of an already-shared slug is pushed to its existing cloud URL. Failed pushes retry every 60s. Shares are never created automatically.
+- Shared cards are marked in the feed.
+- Share management works through the viewer served over Tailscale (`*.ts.net`), not only on loopback.
+
+### Changed
+
+- **Feed filters redesigned.** On a phone, project and tag buttons open a bottom-sheet picker with counts and search; from 800px a sidebar keeps projects and top tags in view and cards flow into a grid. Card metadata is a single non-interactive line plus at most two tags. `/` focuses search.
+- Filter options narrow by the other filters: picking a project shows only that project's tags, and vice versa. `FeedPage` gains `all` and `facetTotals`.
+- The feed header hides on scroll down at phone widths and returns on scroll up.
+- The artifact page header is one row (back, title, share, full screen, more). The title opens a details sheet with revisions, project, tags, type and size. Older revisions are marked and offer Go to latest.
+- A Full screen toggle on the artifact page hides the header; Esc or the floating button brings it back without reloading the artifact.
+
+### Removed
+
+- The viewer's Projects sheet and `DELETE /api/projects/:id`. Use `artifacts project forget` to drop a project.
+
 ## 0.5.0 - 2026-09-15
 
 This is a breaking upgrade from 0.3.0. Version 0.4.0 was an unreleased development version; the changes below cover the entire transition from the last npm release.
