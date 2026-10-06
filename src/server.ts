@@ -16,7 +16,7 @@ import {
 import { previewCacheDir, rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import { forgetProjectArtifacts, resolveBundleFile } from "./store.js";
-import { allowShareRequest, isSharingConfigured, listSharedArtifacts, removeSharedArtifact, sharingState, shareArtifact, ShareError } from "./share.js";
+import { allowShareRequest, isSharingConfigured, listSharedArtifacts, removeSharedArtifact, sharingState, shareArtifact, ShareError, syncSharedArtifacts } from "./share.js";
 
 export const DEFAULT_PORT = 7878;
 const HOST = "127.0.0.1";
@@ -509,6 +509,7 @@ export async function startServer(opts: StartOptions): Promise<ServeStatus> {
     });
   });
   const port = await listenWithFallback(server, opts.preferredPort);
+  startShareSync();
   const rec: ServeStatus = {
     pid: process.pid,
     port,
@@ -534,6 +535,36 @@ export async function startServer(opts: StartOptions): Promise<ServeStatus> {
     process.exit(143);
   });
   return rec;
+}
+
+const SHARE_SYNC_INTERVAL_MS = 5_000;
+const SHARE_RETRY_MS = 60_000;
+
+/**
+ * Pushes new revisions of shared artifacts to their cloud links. The server
+ * runs this, not `submit`, because only the server holds the cloud key. Runs
+ * on every feed change; a failed push stays in "update" and retries each minute.
+ */
+function startShareSync(): void {
+  let lastStamp: string | undefined;
+  let retryAt = Infinity;
+  let running = false;
+  const tick = async () => {
+    const stamp = feedStamp();
+    if (running || (stamp === lastStamp && Date.now() < retryAt)) return;
+    running = true;
+    lastStamp = stamp;
+    try {
+      const { updated, failed } = await syncSharedArtifacts();
+      if (updated) console.log(`Updated ${updated} shared artifact${updated === 1 ? "" : "s"} in the cloud.`);
+      for (const { entry, error } of failed) {
+        console.error(`Could not update the cloud copy of ${entry.slug}: ${(error as Error).message}`);
+      }
+      retryAt = failed.length ? Date.now() + SHARE_RETRY_MS : Infinity;
+    } finally { running = false; }
+  };
+  void tick();
+  setInterval(() => void tick(), SHARE_SYNC_INTERVAL_MS).unref();
 }
 
 async function listenWithFallback(

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
-import { readFeedEntries, type FeedEntry } from "./feed.js";
+import { latestPerSlug, readFeedEntries, type FeedEntry } from "./feed.js";
 import { rootDir } from "./paths.js";
 import { bundleDir, MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES } from "./store.js";
 
@@ -72,17 +72,37 @@ export function isSharingConfigured(): boolean {
   try { config(); return true; } catch { return false; }
 }
 
-export async function shareArtifact(entry: FeedEntry): Promise<SharedArtifact> {
+/** `existingOnly` pushes to an already-shared link and never creates a new one. */
+export async function shareArtifact(entry: FeedEntry, opts: { existingOnly?: boolean } = {}): Promise<SharedArtifact> {
   const { origin, key } = config();
   const scope = scopeFor(entry, origin, key);
   const existing = pending.get(scope);
   if (existing) {
     if (existing.entryId === entry.id) return existing.request;
-    await existing.request; return shareArtifact(entry);
+    await existing.request; return shareArtifact(entry, opts);
   }
-  const request = upload(entry, origin, key, scope).finally(() => pending.delete(scope));
+  const request = upload(entry, origin, key, scope, opts.existingOnly ?? false).finally(() => pending.delete(scope));
   pending.set(scope, { entryId: entry.id, request });
   return request;
+}
+
+/**
+ * A share link names the artifact, not one revision of it: push every newer
+ * revision of an already-shared artifact to its existing URL. Never creates a
+ * new share. Returns how many were pushed and which failed (left in "update").
+ */
+export async function syncSharedArtifacts(): Promise<{ updated: number; failed: Array<{ entry: FeedEntry; error: unknown }> }> {
+  const result = { updated: 0, failed: [] as Array<{ entry: FeedEntry; error: unknown }> };
+  if (!isSharingConfigured()) return result;
+  for (const entry of latestPerSlug(readFeedEntries())) {
+    if (sharingState(entry).state !== "update") continue;
+    try { await shareArtifact(entry, { existingOnly: true }); result.updated++; }
+    catch (error) {
+      // Revoked in the cloud: the card is back to "share", which is not a failure.
+      if (!(error instanceof ShareError && error.status === 410)) result.failed.push({ entry, error });
+    }
+  }
+  return result;
 }
 
 async function cloudFetch(url: string, key: string, init: RequestInit = {}): Promise<Response> {
@@ -102,7 +122,7 @@ function failure(status: number): ShareError {
   return new ShareError(502, messages[status] ?? "The sharing service could not accept this artifact. Please retry.");
 }
 
-async function upload(entry: FeedEntry, origin: string, key: string, scope: string): Promise<SharedArtifact> {
+async function upload(entry: FeedEntry, origin: string, key: string, scope: string, existingOnly: boolean): Promise<SharedArtifact> {
   const cacheDir = path.join(rootDir(), "share-cache");
   const cachePath = path.join(cacheDir, `${scope}.json`);
   let cached = readRecord(entry, origin, key);
@@ -115,6 +135,11 @@ async function upload(entry: FeedEntry, origin: string, key: string, scope: stri
       } else cached = undefined;
     } else if (status.status !== 404) throw failure(status.status);
     else cached = undefined;
+  }
+  if (!cached && existingOnly) {
+    const stale = readRecord(entry, origin, key);
+    if (stale) markRevoked(stale.id);
+    throw new ShareError(410, "The shared link was removed in the cloud.");
   }
 
   const { files, manifest } = prepareBundle(entry);

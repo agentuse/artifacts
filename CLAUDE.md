@@ -103,6 +103,8 @@ Routes:
 
 There is no `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, `/api/settings`, or `GET`/`POST /api/projects` any more. They belonged to the scanner and the registry it needed.
 
+Cloud share sync: a share link names the artifact (project + slug), not a revision. While `serve` runs, `startShareSync()` checks `feedStamp()` every 5s and calls `syncSharedArtifacts()`, which pushes the newest revision of every already-shared slug to its existing URL (`PUT`). It never creates a share (`existingOnly`): a link revoked in the cloud is marked revoked locally and left alone. Failed pushes keep the card in "update" and retry every 60s. This lives in the server, not `submit`, because only the server holds `ARTIFACTS_CLOUD_API_KEY`. To freeze a shared snapshot, submit later versions under a different `--slug`.
+
 Server lifecycle:
 - `serve` writes `.serve.pid`. `serve --detach` re-spawns `dist/bin.js serve --port N` with `detached: true` and `stdio: "ignore"`, then polls `.serve.pid` for up to 5s. `serve --stop` SIGTERMs and cleans up.
 - Default port `7878`, with sequential fallback up to `+50` on `EADDRINUSE`.

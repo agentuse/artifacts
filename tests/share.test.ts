@@ -200,3 +200,58 @@ it("backfills only cloud shares whose fingerprint matches the cached local snaps
   expect((await listSharedArtifacts()).shares[0]?.artifact).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+describe("syncSharedArtifacts", () => {
+  it("pushes a new revision of a shared artifact to its existing link and leaves unshared ones alone", async () => {
+    const { sharingState, syncSharedArtifacts } = await import("../src/share");
+    const first = await artifact();
+    const other = path.join(tempProjectDir(), "notes.md");
+    fs.writeFileSync(other, "# Never shared");
+    await submitArtifact({ target: other });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(shared)));
+    await shareArtifact(first);
+    fs.writeFileSync(path.join(project, "index.html"), "<h1>Dashboard v2</h1>");
+    const next = (await submitArtifact({ target: project })).entry;
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => init.method
+      ? Response.json(shared) : Response.json({ status: "active" }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await syncSharedArtifacts()).toEqual({ updated: 1, failed: [] });
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init.method])).toEqual([
+      [`https://api.example.com/v1/shares/${shared.id}`, undefined],
+      [`https://api.example.com/v1/shares/${shared.id}`, "PUT"],
+    ]);
+    expect(sharingState(next)).toEqual({ state: "shared", url: shared.url });
+    expect(await syncSharedArtifacts()).toEqual({ updated: 0, failed: [] });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fs.rmSync(path.dirname(other), { recursive: true, force: true });
+  });
+
+  it("never re-creates a link that was revoked in the cloud", async () => {
+    const { sharingState, syncSharedArtifacts } = await import("../src/share");
+    const first = await artifact();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(shared)));
+    await shareArtifact(first);
+    fs.writeFileSync(path.join(project, "index.html"), "<h1>Changed</h1>");
+    const next = (await submitArtifact({ target: project })).entry;
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => init.method
+      ? Response.json(shared) : Response.json({ status: "revoked" }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await syncSharedArtifacts()).toEqual({ updated: 0, failed: [] });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sharingState(next).state).toBe("share");
+  });
+
+  it("reports a failed push and keeps the card in Update", async () => {
+    const { sharingState, syncSharedArtifacts } = await import("../src/share");
+    const first = await artifact();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(shared)));
+    await shareArtifact(first);
+    fs.writeFileSync(path.join(project, "index.html"), "<h1>Changed</h1>");
+    const next = (await submitArtifact({ target: project })).entry;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => init.method === "PUT"
+      ? new Response(null, { status: 500 }) : Response.json({ status: "active" })));
+    const { failed } = await syncSharedArtifacts();
+    expect(failed.map(f => f.entry.id)).toEqual([next.id]);
+    expect(sharingState(next).state).toBe("update");
+  });
+});

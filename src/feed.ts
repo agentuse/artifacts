@@ -226,7 +226,7 @@ function matches(entry: FeedEntry, query: FeedQuery): boolean {
   return true;
 }
 
-function latestPerSlug(entries: FeedEntry[]): FeedEntry[] {
+export function latestPerSlug(entries: FeedEntry[]): FeedEntry[] {
   const byKey = new Map<string, FeedEntry>();
   for (const entry of entries) {
     const key = `${entry.projectId}\0${entry.slug}`;
