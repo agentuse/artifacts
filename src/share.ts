@@ -41,17 +41,28 @@ export class ShareError extends Error {
 const pending = new Map<string, { entryId: string; request: Promise<SharedArtifact> }>();
 const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 
+// A Tailscale name (tailscale serve / a Tailscale Service). Only Tailscale can
+// point a ts.net name at this machine, so it is not a DNS-rebinding vector.
+const TAILNET_HOST = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+ts\.net$/i;
+
 /** A cross-origin form must never be able to publish a private local artifact. */
 export function allowShareRequest(req: Pick<IncomingMessage, "headers">): boolean {
   if (req.headers["x-artifacts-share"] !== "1" ||
-      !/^application\/json(?:;|$)/i.test(req.headers["content-type"] ?? "") ||
-      !/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(req.headers.host ?? "")) return false;
+      !/^application\/json(?:;|$)/i.test(req.headers["content-type"] ?? "")) return false;
+  const host = req.headers.host ?? "";
   const origin = req.headers.origin;
-  if (!origin) return true; // Non-browser clients still need the explicit header.
-  try {
-    const url = new URL(origin);
-    return ["http:", "https:"].includes(url.protocol) && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  } catch { return false; }
+  if (/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host)) {
+    if (!origin) return true; // Non-browser clients still need the explicit header.
+    try {
+      const url = new URL(origin);
+      return ["http:", "https:"].includes(url.protocol) && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    } catch { return false; }
+  }
+  // Through Tailscale the viewer must be the same https origin as the host it
+  // was served from. Browsers omit Origin on same-origin GETs (the share list),
+  // so fall back to Sec-Fetch-Site, which page scripts cannot set.
+  if (!TAILNET_HOST.test(host)) return false;
+  return origin ? origin === `https://${host.toLowerCase()}` : req.headers["sec-fetch-site"] === "same-origin";
 }
 
 function config() {

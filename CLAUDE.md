@@ -107,6 +107,8 @@ There is no `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/proje
 
 Cloud share sync: a share link names the artifact (project + slug), not a revision. While `serve` runs, `startShareSync()` checks `feedStamp()` every 5s and calls `syncSharedArtifacts()`, which pushes the newest revision of every already-shared slug to its existing URL (`PUT`). It never creates a share (`existingOnly`): a link revoked in the cloud is marked revoked locally and left alone. Failed pushes keep the card in "update" and retry every 60s. This lives in the server, not `submit`, because only the server holds `ARTIFACTS_CLOUD_API_KEY`. To freeze a shared snapshot, submit later versions under a different `--slug`.
 
+Share routes (`/api/entry/:id/share`, `/api/shares*`) are gated by `allowShareRequest()`: they publish private artifacts, so a cross-site page or a DNS-rebinding host must never reach them. Accepted: a loopback `Host` with a loopback or absent `Origin`, or a `*.ts.net` `Host` (the viewer through `tailscale serve` / a Tailscale Service) whose `Origin` is exactly `https://<host>`, or, on same-origin GETs where browsers omit `Origin`, `Sec-Fetch-Site: same-origin`. Every case also needs `x-artifacts-share: 1` and a JSON content type. `ts.net` names are safe to trust because only Tailscale can point one at this machine; this does mean any device on the tailnet can share. Never widen this to arbitrary hosts.
+
 Server lifecycle:
 - `serve` writes `.serve.pid`. `serve --detach` re-spawns `dist/bin.js serve --port N` with `detached: true` and `stdio: "ignore"`, then polls `.serve.pid` for up to 5s. `serve --stop` SIGTERMs and cleans up.
 - Default port `7878`, with sequential fallback up to `+50` on `EADDRINUSE`.

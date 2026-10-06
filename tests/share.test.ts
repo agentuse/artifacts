@@ -94,6 +94,19 @@ describe("share request boundary", () => {
     expect(allowShareRequest({ headers: { ...headers, host: "attacker.example" } })).toBe(false);
     expect(allowShareRequest({ headers: { ...headers, origin: "null" } })).toBe(false);
   });
+  it("accepts the viewer served through Tailscale only from its own https origin", () => {
+    const tailnet = { ...headers, host: "artifacts-m5.dog-snapper.ts.net", origin: "https://artifacts-m5.dog-snapper.ts.net" };
+    expect(allowShareRequest({ headers: tailnet })).toBe(true);
+    expect(allowShareRequest({ headers: { ...tailnet, origin: undefined } })).toBe(false);
+    // Same-origin GETs (the share list) carry no Origin, only Sec-Fetch-Site.
+    expect(allowShareRequest({ headers: { ...tailnet, origin: undefined, "sec-fetch-site": "same-origin" } })).toBe(true);
+    expect(allowShareRequest({ headers: { ...tailnet, origin: undefined, "sec-fetch-site": "cross-site" } })).toBe(false);
+    expect(allowShareRequest({ headers: { ...tailnet, origin: "http://artifacts-m5.dog-snapper.ts.net" } })).toBe(false);
+    expect(allowShareRequest({ headers: { ...tailnet, origin: "https://other.dog-snapper.ts.net" } })).toBe(false);
+    expect(allowShareRequest({ headers: { ...tailnet, origin: "null" } })).toBe(false);
+    expect(allowShareRequest({ headers: { ...tailnet, host: "ts.net.attacker.example", origin: "https://ts.net.attacker.example" } })).toBe(false);
+    expect(allowShareRequest({ headers: { ...tailnet, "x-artifacts-share": undefined } })).toBe(false);
+  });
 });
 
 it("advertises sharing only when the cloud URL and a nonblank key are configured", () => {
