@@ -61,7 +61,7 @@ export function latestTarget(entry: FeedEntry): EntryTarget {
 export function targetPath(target: EntryTarget): string {
   return target.kind === "entry"
     ? `/a/${encodeURIComponent(target.id)}`
-    : `/latest/${encodeURIComponent(target.projectId)}/${encodeURIComponent(target.slug)}`;
+    : `/p/${encodeURIComponent(target.projectId)}/${encodeURIComponent(target.slug)}`;
 }
 
 export async function fetchEntry(target: EntryTarget, etag?: string | null): Promise<EntryFetchResult> {

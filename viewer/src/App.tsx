@@ -19,7 +19,7 @@ function parseRoute(href: string): Route {
   let detail: EntryTarget | undefined;
   try {
     if (parts[0] === "a" && parts[1]) detail = { kind: "entry", id: decodeURIComponent(parts[1]) };
-    if (parts[0] === "latest" && parts[1] && parts[2]) {
+    if (parts[0] === "p" && parts[1] && parts[2]) {
       detail = { kind: "latest", projectId: decodeURIComponent(parts[1]), slug: decodeURIComponent(parts[2]) };
     }
   } catch { /* A malformed link falls back to the feed. */ }

@@ -27,6 +27,6 @@ describe("viewer URL helpers", () => {
 
 it("links to the newest revision by project and slug", () => {
   expect(viewerLatestUrl({ port: 7878 }, "proj_abc", "weekly.dashboard")).toBe(
-    "http://127.0.0.1:7878/latest/proj_abc/weekly.dashboard",
+    "http://127.0.0.1:7878/p/proj_abc/weekly.dashboard",
   );
 });

@@ -22,5 +22,5 @@ export function viewerEntryUrl(loc: ViewerLocation, entryId: string): string {
 
 /** A permalink that always opens the newest revision of one artifact. */
 export function viewerLatestUrl(loc: ViewerLocation, projectId: string, slug: string): string {
-  return `http://127.0.0.1:${loc.port}/latest/${encodeURIComponent(projectId)}/${encodeURIComponent(slug)}`;
+  return `http://127.0.0.1:${loc.port}/p/${encodeURIComponent(projectId)}/${encodeURIComponent(slug)}`;
 }
