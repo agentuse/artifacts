@@ -65,7 +65,10 @@ export function targetPath(target: EntryTarget): string {
 }
 
 export async function fetchEntry(target: EntryTarget, etag?: string | null): Promise<EntryFetchResult> {
-  const api = target.kind === "entry" ? `/api/entry/${encodeURIComponent(target.id)}` : `/api${targetPath(target)}`;
+  // Page paths and API paths are named independently; never derive one from the other.
+  const api = target.kind === "entry"
+    ? `/api/entry/${encodeURIComponent(target.id)}`
+    : `/api/latest/${encodeURIComponent(target.projectId)}/${encodeURIComponent(target.slug)}`;
   const res = await fetch(api, {
     cache: "no-store",
     headers: etag ? { "if-none-match": etag } : undefined,

@@ -21,3 +21,12 @@ it('returns a valid share and preserves actionable backend errors', async () => 
   vi.stubGlobal('fetch', vi.fn(async () => new Response('Sharing is not configured.', { status: 503 })));
   await expect(shareEntry('art_test')).rejects.toThrow('Sharing is not configured.');
 });
+
+it('loads a permalink page from the latest-revision API, not from the page path', async () => {
+  const { fetchEntry } = await import('../viewer/src/api');
+  const fetcher = vi.fn(async () => Response.json({ entry: {}, revisions: [] }));
+  vi.stubGlobal('fetch', fetcher);
+  await fetchEntry({ kind: 'latest', projectId: 'proj_abc', slug: 'dash' });
+  await fetchEntry({ kind: 'entry', id: 'art_1' });
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(['/api/latest/proj_abc/dash', '/api/entry/art_1']);
+});
