@@ -99,6 +99,7 @@ Routes:
 - `GET /api/preview/:entryId?w=` -> cached WebP thumbnail for image entries. 400 for non-images.
 - `GET /api/raw/:entryId` -> the entry file exactly as submitted, `application/octet-stream` + `Content-Disposition: attachment` (powers Download / Copy content; never rendered inline).
 - `DELETE /api/projects/:id` -> drop every feed entry and stored bundle for that project. This is the only project route; there is no registry to list, add to, or prune.
+- `GET /latest/:projectId/:slug` -> 302 to `/a/<newest entry id>`, `no-store`. The permalink for an artifact that keeps being re-submitted (a dashboard): `/a/:id` names one immutable revision, this names the artifact. `submit` prints it as `latest:` (`latestUrl` in `--json`), and the viewer's "Copy link" copies it ("Copy link to rev N" copies the revision).
 - Everything else falls back to `viewer-dist/index.html` for SPA routes (`/`, `/a/:entryId`).
 
 There is no `/api/manifest`, `/api/artifact/:id`, `/api/render/:id`, `/api/project-files/…`, `/api/project-artifacts/…`, `/api/settings`, or `GET`/`POST /api/projects` any more. They belonged to the scanner and the registry it needed.

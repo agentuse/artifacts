@@ -183,6 +183,11 @@ function DetailHead(props: {
 
 type CopyState = null | "path" | "content" | "link";
 
+/** Opens whatever revision is newest when followed; mirrors the server's /latest route. */
+function latestLink(entry: FeedEntry): string {
+  return `${window.location.origin}/latest/${encodeURIComponent(entry.projectId)}/${encodeURIComponent(entry.slug)}`;
+}
+
 /**
  * Download and "copy content" go through /api/raw/:id so they hand back the
  * exact file the agent submitted — notably the original, unsanitized HTML
@@ -242,10 +247,19 @@ function Actions(props: { entry: FeedEntry; open: boolean; onOpenChange: (open: 
             type="button"
             role="menuitem"
             className="action-menu-item"
-            onClick={() => copy("link", () => window.location.href)}
+            onClick={() => copy("link", () => latestLink(props.entry))}
           >
             <Copy size={14} strokeWidth={2} />
             <span>Copy link</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="action-menu-item"
+            onClick={() => copy("link", () => window.location.href)}
+          >
+            <Copy size={14} strokeWidth={2} />
+            <span>Copy link to rev {props.entry.rev}</span>
           </button>
           <button
             type="button"

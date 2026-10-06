@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { viewerEntryUrl, viewerFeedUrl } from "../src/artifacts";
+import { viewerEntryUrl, viewerFeedUrl, viewerLatestUrl } from "../src/artifacts";
 
 describe("viewer URL helpers", () => {
   it("builds the unfiltered feed URL", () => {
@@ -23,4 +23,10 @@ describe("viewer URL helpers", () => {
       "http://127.0.0.1:7878/a/art_0123456789abcdef",
     );
   });
+});
+
+it("links to the newest revision by project and slug", () => {
+  expect(viewerLatestUrl({ port: 7878 }, "proj_abc", "weekly.dashboard")).toBe(
+    "http://127.0.0.1:7878/latest/proj_abc/weekly.dashboard",
+  );
 });

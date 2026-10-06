@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { entryPath } from "./artifacts.js";
 import { CliError } from "./errors.js";
 import {
   feedEntryRevisions,
@@ -463,6 +464,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
       send(res, code, (e as Error).message);
     }
+    return;
+  }
+
+  // /latest/{projectId}/{slug} -> redirect to the newest revision. Entry ids
+  // name one immutable revision, so this is the link to bookmark or hand out
+  // for an artifact that keeps being re-submitted (a dashboard).
+  const latestMatch = /^\/latest\/([^/]+)\/([^/]+)\/?$/.exec(pathname);
+  if (latestMatch && req.method === "GET") {
+    let projectId: string, slug: string;
+    try {
+      projectId = decodeURIComponent(latestMatch[1]!);
+      slug = decodeURIComponent(latestMatch[2]!);
+    } catch { send(res, 400, "Malformed artifact link."); return; }
+    const newest = feedEntryRevisions(readFeedEntries(), projectId, slug)[0];
+    if (!newest) { send(res, 404, "No artifact found at this link."); return; }
+    res.writeHead(302, { location: entryPath(newest.id), "cache-control": "no-store" });
+    res.end();
     return;
   }
 

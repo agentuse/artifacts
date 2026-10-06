@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { CliError, ErrorEnvelope, envelope, exitCodeFor } from "./errors.js";
-import { viewerEntryUrl, viewerFeedUrl } from "./artifacts.js";
+import { viewerEntryUrl, viewerFeedUrl, viewerLatestUrl } from "./artifacts.js";
 import { queryFeed, type FeedEntry } from "./feed.js";
 import { rootDir } from "./paths.js";
 import { resolveProject } from "./project.js";
@@ -97,10 +97,12 @@ export async function runCli(argv: string[]): Promise<void> {
         });
         const url = viewerEntryUrl({ port: currentPort() }, result.entry.id);
         if (opts.open && !global.json) openBrowser(url);
-        emit(global.json, { ...result, url }, () => {
+        const latestUrl = viewerLatestUrl({ port: currentPort() }, result.entry.projectId, result.entry.slug);
+        emit(global.json, { ...result, url, latestUrl }, () => {
           const what = result.deduped ? "unchanged" : `rev ${result.entry.rev}`;
           human(`✓ ${result.entry.title} (${what})`);
           human(`  ${url}`);
+          human(`  latest: ${latestUrl}`);
         });
       } catch (e) {
         fail(global.json, e);
