@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Check, ChevronDown, Cloud, Copy, Download, FileText, History, Link, Maximize2, Minimize2, MoreHorizontal } from "lucide-react";
 import { bundleUrl, fetchEntry, latestTarget, rawUrl, targetPath, type EntryTarget } from "../api";
-import { ArtifactBody, isTextEntry } from "./Render";
+import { ArtifactBody, isPlainTextEntry, isTextEntry } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import { ShareButton } from "./ShareButton";
 import { DetailsSheet } from "./DetailsSheet";
@@ -346,7 +346,7 @@ function Actions(props: {
             <FileText size={14} strokeWidth={2} />
             <span>Copy source path</span>
           </button>
-          {isTextEntry(props.entry) || props.entry.type === "html" ? (
+          {isTextEntry(props.entry) || isPlainTextEntry(props.entry) || props.entry.type === "html" ? (
             <button
               type="button"
               role="menuitem"

@@ -3,12 +3,14 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import rehypeHighlight from "rehype-highlight";
-import { bundleUrl, fetchText, previewUrl } from "../api";
+import { bundleUrl, fetchText, previewUrl, rawUrl } from "../api";
 import { parseMarkdownFrontmatter, type FrontmatterField, type FrontmatterValue } from "../frontmatter";
 import type { FeedEntry } from "../types";
 
 const PREVIEW_WIDTHS = [320, 480, 720, 960, 1280, 1600, 2048];
 const PREVIEW_CHARS = 320;
+/** Past this a text file is a download, not something to paint into the page. */
+const MAX_INLINE_TEXT_BYTES = 2 * 1024 * 1024;
 const textCache = new Map<string, string>();
 const textPromises = new Map<string, Promise<string>>();
 
@@ -20,10 +22,32 @@ export function isTextEntry(entry: FeedEntry): boolean {
   return entry.type === "markdown" || entry.type === "agentuse";
 }
 
-export function typeLabel(type: FeedEntry["type"]): string {
-  if (type === "markdown") return "MD";
-  if (type === "agentuse") return "AGENTUSE";
-  return type.toUpperCase();
+/** Plain text, code, and data files: shown verbatim, never parsed as markdown. */
+export function isPlainTextEntry(entry: FeedEntry): boolean {
+  return entry.type === "text";
+}
+
+export function fileName(entry: FeedEntry): string {
+  return entry.entry.split("/").pop() || entry.entry;
+}
+
+export function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/** For text and file entries the extension says more than the kind ("CSV", "ZIP"). */
+export function typeLabel(entry: FeedEntry): string {
+  if (entry.type === "markdown") return "MD";
+  if (entry.type === "agentuse") return "AGENTUSE";
+  if (entry.type === "text" || entry.type === "file") {
+    const name = fileName(entry);
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? name.slice(dot + 1).toUpperCase() : entry.type.toUpperCase();
+  }
+  return entry.type.toUpperCase();
 }
 
 function cachedText(url: string): Promise<string> {
@@ -100,7 +124,53 @@ export function ArtifactBody(props: { entry: FeedEntry }) {
       </div>
     );
   }
+  if (entry.type === "video") {
+    return (
+      <div className="body media">
+        <video src={bundleUrl(entry)} controls playsInline preload="metadata" />
+      </div>
+    );
+  }
+  if (entry.type === "audio") {
+    return (
+      <div className="body media audio">
+        <audio src={bundleUrl(entry)} controls preload="metadata" />
+      </div>
+    );
+  }
+  if (isPlainTextEntry(entry)) {
+    return entry.size > MAX_INLINE_TEXT_BYTES ? <FileBody entry={entry} /> : <PlainTextBody entry={entry} />;
+  }
+  if (entry.type === "file") return <FileBody entry={entry} />;
   return <MarkdownBody entry={entry} />;
+}
+
+/** A kind the browser can't show: say what it is and hand it over. */
+function FileBody(props: { entry: FeedEntry }) {
+  const name = fileName(props.entry);
+  return (
+    <div className="body file">
+      <div className="file-card">
+        <span className="file-card-type">{typeLabel(props.entry)}</span>
+        <span className="file-card-name">{name}</span>
+        <span className="file-card-size">{fmtSize(props.entry.size)}</span>
+        <a className="file-card-download" href={rawUrl(props.entry)} download={name}>
+          Download
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function PlainTextBody(props: { entry: FeedEntry }) {
+  const { text, error } = useArtifactText(bundleUrl(props.entry));
+  if (error) return <div className="body body-message">could not load: {error}</div>;
+  if (text == null) return <div className="body body-message">loading…</div>;
+  return (
+    <div className="body plain-text">
+      <pre>{text}</pre>
+    </div>
+  );
 }
 
 function MarkdownBody(props: { entry: FeedEntry }) {
@@ -197,9 +267,24 @@ export const ArtifactPreview = memo(function ArtifactPreview(props: {
       </div>
     );
   }
+  if (entry.type === "video") {
+    // #t= makes Safari paint a real frame instead of a black box.
+    return (
+      <div className="card-preview-video">
+        <video src={`${bundleUrl(entry)}#t=0.5`} muted playsInline preload="metadata" tabIndex={-1} />
+      </div>
+    );
+  }
   if (isTextEntry(entry)) return <MarkdownExcerpt entry={entry} />;
+  if (isPlainTextEntry(entry) && entry.size <= MAX_INLINE_TEXT_BYTES) return <PlainTextExcerpt entry={entry} />;
   return null;
 });
+
+function PlainTextExcerpt(props: { entry: FeedEntry }) {
+  const { text } = useArtifactText(bundleUrl(props.entry));
+  if (!text) return null;
+  return <p className="card-excerpt mono">{text.slice(0, PREVIEW_CHARS)}</p>;
+}
 
 function aspectStyle(entry: FeedEntry): { aspectRatio?: string } {
   if (!entry.naturalWidth || !entry.naturalHeight) return {};

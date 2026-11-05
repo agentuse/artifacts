@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Any single file can be submitted.** Video (mp4, m4v, mov, webm) and audio (mp3, m4a, aac, wav, ogg, flac) play inline, with a video frame as the feed thumbnail. Text, code, and data files (txt, log, csv, json, yaml, srt, vtt, ts, py, ...) show verbatim with a short excerpt on the card. Anything else becomes a `file` entry with a download card instead of being refused.
+- Single files may be up to 2GB (directory bundles keep the 25MB cap). Bundle files are streamed with HTTP byte ranges, so Safari can play and seek large videos, and hashing reads in chunks instead of loading whole files.
+- `ARTIFACTS_VIEWER_URL` sets the origin of every printed link (for example the viewer's Tailscale address), so a link from `submit` opens on other devices.
+
+### Unchanged on purpose
+
+- Directory bundles pick their entry file and count toward the cap exactly as before: media and data files are not entry candidates and are still skipped inside a directory, so existing design folders submit the same way.
+
 ## 0.6.0 - 2026-10-05
 
 ### Added

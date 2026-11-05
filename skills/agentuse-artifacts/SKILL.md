@@ -41,7 +41,7 @@ Inside the package checkout, use `npm run dev -- <command>`. Most commands accep
 
    `submit` prints the artifact's URL. It is a permalink that always opens the newest revision, so re-submitting (a dashboard, a living report) never needs a new link. There is no setup step.
 
-3. **Give the user the URL** that `submit` printed. If the viewer is not running yet, start it once:
+3. **Give the user the URL** that `submit` printed. When `ARTIFACTS_VIEWER_URL` is set (for example to the viewer's Tailscale address), that link opens on the user's phone too; without it the link is `127.0.0.1` and only works on this machine. If the viewer is not running yet, start it once:
 
    ```bash
    npx @agentuse/artifacts open
@@ -52,7 +52,7 @@ Inside the package checkout, use `npm run dev -- <command>`. Most commands accep
 `submit` takes either a single file or a directory.
 
 - **A directory is one artifact.** Its entry file is `index.html`, `index.md`, or `index.agentuse`; every sibling file (CSS, images, fonts, SVG) is copied with it, so relative paths keep working.
-- **A single file is a one-file artifact.** `report.md`, `chart.png`, `deck.pdf`.
+- **A single file is a one-file artifact, and any file goes.** Markdown, HTML, images and PDF render; video (mp4, mov, webm) and audio (mp3, m4a, wav) play; text, code and data (txt, csv, json, yaml, srt, ...) show verbatim; anything else (zip, key, docx, ...) gets a card with a Download button.
 
 ```txt
 tmp/customer-report/
@@ -63,7 +63,9 @@ tmp/customer-report/
 
 If a directory has several renderable files and no `index.*`, `submit` fails and asks for one. That is deliberate: an artifact has exactly one thing to open.
 
-Limits: 25MB and 200 files per bundle. `node_modules`, `.git`, `dist`, `build`, and dotfiles are skipped.
+Limits: 25MB and 200 files per directory bundle; 2GB for a single file. `node_modules`, `.git`, `dist`, `build`, and dotfiles are skipped.
+
+A file named `sample-1.mp4` or `final-link.mp4` gets a useless humanized title, so always pass `--title` for media and plain files: say what it is and which piece or task it belongs to (`--title "ChatGPT routine short: sample 1"`).
 
 ## Titles, tags, and slugs
 

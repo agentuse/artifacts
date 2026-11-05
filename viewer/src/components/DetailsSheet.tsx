@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Cloud, Folder, X } from "lucide-react";
-import { typeLabel } from "./Render";
+import { fmtSize, typeLabel } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import type { FeedEntry } from "../types";
 
@@ -88,7 +88,7 @@ export function DetailsSheet(props: {
             </div>
           )}
           <p className="mono secondary details-facts">
-            {typeLabel(entry.type)} · {fmtSize(entry.size)}
+            {typeLabel(entry)} · {fmtSize(entry.size)}
             {entry.files > 1 ? ` · ${entry.files} files` : ""}
           </p>
         </section>
@@ -97,8 +97,4 @@ export function DetailsSheet(props: {
   );
 }
 
-export function fmtSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
+

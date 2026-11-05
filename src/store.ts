@@ -16,7 +16,7 @@ import { readImageDims } from "./imageDims.js";
 import { withLock } from "./lock.js";
 import { storeDir } from "./paths.js";
 import { resolveProject } from "./project.js";
-import { inferType, type ArtifactType } from "./validation.js";
+import { inferFileType, inferType, type ArtifactType } from "./validation.js";
 
 /**
  * A submitted artifact is copied into the store rather than referenced in
@@ -27,6 +27,8 @@ import { inferType, type ArtifactType } from "./validation.js";
  */
 export const MAX_BUNDLE_BYTES = 25 * 1024 * 1024;
 export const MAX_BUNDLE_FILES = 200;
+/** One submitted file (a final render, a recording) may be far bigger than a bundle. */
+export const MAX_SINGLE_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 const IMAGE_HEADER_BYTES = 256 * 1024;
 const DEFAULT_KEEP_REVISIONS = 5;
 
@@ -83,7 +85,7 @@ export async function submitArtifact(opts: SubmitOptions): Promise<SubmitResult>
     throw new CliError("INVALID_INPUT", `no supported files to submit in ${opts.target}`);
   }
   const entryRel = pickEntryFile(files, stat.isDirectory());
-  const entryType = inferType(entryRel);
+  const entryType = stat.isDirectory() ? inferType(entryRel) : inferFileType(entryRel);
 
   const sourceDir = stat.isDirectory() ? abs : path.dirname(abs);
   const project = resolveProject(opts.cwd ?? legacyProjectRoot(sourceDir) ?? sourceDir);
@@ -263,10 +265,9 @@ function sameTags(a: readonly string[], b: readonly string[]): boolean {
 }
 
 function singleFile(abs: string): BundleFile {
-  inferType(abs); // throws on unsupported extension
   const stat = fs.statSync(abs);
-  if (stat.size > MAX_BUNDLE_BYTES) {
-    throw new CliError("INVALID_INPUT", `file is larger than the ${fmtMb(MAX_BUNDLE_BYTES)} bundle limit`);
+  if (stat.size > MAX_SINGLE_FILE_BYTES) {
+    throw new CliError("INVALID_INPUT", `file is larger than the ${fmtMb(MAX_SINGLE_FILE_BYTES)} limit`);
   }
   return { rel: path.basename(abs), abs, size: stat.size };
 }
@@ -407,12 +408,24 @@ function rmDir(dir: string): void {
   }
 }
 
+/** Chunked, so a multi-GB video never sits in memory whole. */
+function hashFile(hash: ReturnType<typeof createHash>, abs: string): void {
+  const fd = fs.openSync(abs, "r");
+  try {
+    const buf = Buffer.allocUnsafe(1024 * 1024);
+    let n: number;
+    while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) hash.update(buf.subarray(0, n));
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function hashBundle(files: BundleFile[]): string {
   const hash = createHash("sha256");
   for (const file of [...files].sort((a, b) => a.rel.localeCompare(b.rel))) {
     hash.update(file.rel);
     hash.update("\0");
-    hash.update(fs.readFileSync(file.abs));
+    hashFile(hash, file.abs);
     hash.update("\0");
   }
   return hash.digest("hex").slice(0, 32);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferType } from "../src/validation";
+import { inferFileType, inferType } from "../src/validation";
 import { CliError } from "../src/errors";
 
 describe("inferType", () => {
@@ -27,5 +27,25 @@ describe("inferType", () => {
     expect(() => inferType("a.svg")).toThrow(CliError);
     expect(() => inferType("a.gif")).toThrow(CliError);
     expect(() => inferType("a")).toThrow(CliError);
+  });
+});
+
+describe("inferFileType", () => {
+  it("keeps the renderable types", () => {
+    expect(inferFileType("a.md")).toBe("markdown");
+    expect(inferFileType("a.PDF")).toBe("pdf");
+  });
+  it("video/audio/text", () => {
+    expect(inferFileType("a.mp4")).toBe("video");
+    expect(inferFileType("a.mov")).toBe("video");
+    expect(inferFileType("a.mp3")).toBe("audio");
+    expect(inferFileType("a.wav")).toBe("audio");
+    expect(inferFileType("a.csv")).toBe("text");
+    expect(inferFileType("a.yaml")).toBe("text");
+  });
+  it("falls back to file for anything else", () => {
+    expect(inferFileType("a.zip")).toBe("file");
+    expect(inferFileType("a.gif")).toBe("file");
+    expect(inferFileType("a")).toBe("file");
   });
 });

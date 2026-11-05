@@ -145,9 +145,30 @@ describe("submitArtifact", () => {
     expect(entry.title).toBe("Quarterly plan");
   });
 
-  it("rejects an unsupported single file", async () => {
-    const file = write(project, "notes.txt", "hello");
-    await expect(submitArtifact({ target: file })).rejects.toThrow(/unsupported file type/i);
+  it("accepts any single file, typed by extension", async () => {
+    const cases: Array<[string, string]> = [
+      ["notes.txt", "text"],
+      ["clip.mp4", "video"],
+      ["voice.m4a", "audio"],
+      ["data.json", "text"],
+      ["deck.key", "file"],
+      ["Makefile", "file"],
+    ];
+    for (const [name, type] of cases) {
+      const { entry } = await submitArtifact({ target: write(project, name, "x") });
+      expect(entry.type, name).toBe(type);
+      expect(fs.existsSync(path.join(bundleDir(entry), name)), name).toBe(true);
+    }
+  });
+
+  it("keeps media and data out of a directory bundle's entry choice", async () => {
+    write(project, "page/chart.html", "<title>Chart</title>");
+    write(project, "page/data.json", "{}");
+    write(project, "page/clip.mp4", "x");
+    const { entry } = await submitArtifact({ target: path.join(project, "page") });
+    expect(entry.entry).toBe("chart.html");
+    expect(entry.type).toBe("html");
+    expect(fs.existsSync(path.join(bundleDir(entry), "clip.mp4"))).toBe(false);
   });
 
   it("rejects a directory with several renderable files and no index", async () => {

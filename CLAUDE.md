@@ -58,6 +58,8 @@ The cost is disk. `pruneStore()` (CLI: `artifacts prune`) keeps the newest N rev
 ### Bundle semantics (`src/store.ts`)
 
 - `submitArtifact()` takes a file or a directory. A directory's entry file is the first of `index.html/htm/md/markdown/agentuse`; failing that, the single renderable file; failing that it throws rather than guessing.
+- **A single file can be anything; a directory cannot.** `inferFileType()` types a lone file (video, audio, text, or the `file` download fallback) and allows up to `MAX_SINGLE_FILE_BYTES` (2GB). Directories still use the strict `inferType()` for entry picking and membership, so a clip or data.json inside a design folder never becomes a competing entry or counts toward the 25MB cap. Keep the two paths separate.
+- Bundle files stream through `sendFile()` with HTTP byte ranges (Safari won't play video without 206s); never go back to `readFileSync` for `/api/store` or `/api/raw`.
 - Support files (css, svg, ico, json, fonts, gif) are copied alongside renderable types so relative URLs resolve. `node_modules`, `.git`, `dist`, `build`, `coverage`, `__pycache__`, dotfiles, and symlinks are skipped.
 - Caps are checked **during the walk, before any copy**: `MAX_BUNDLE_FILES` (200) and `MAX_BUNDLE_BYTES` (25MB). A too-large bundle fails loudly and leaves nothing behind.
 - The copy goes to a `.tmp.<pid>` sibling and is renamed into place, so a crash mid-copy can't leave a half-written bundle behind a feed line that points at it.

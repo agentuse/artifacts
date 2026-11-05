@@ -78,7 +78,7 @@ Open the feed:
 npx @agentuse/artifacts open
 ```
 
-The viewer renders Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, and PDF. HTML artifacts are sanitized and loaded in a sandboxed iframe.
+The viewer renders Markdown, AgentUse `.agentuse`, HTML, PNG/JPG/WebP, and PDF. HTML artifacts are sanitized and loaded in a sandboxed iframe. A single submitted file can be anything: video and audio play inline (with byte-range streaming, up to 2GB), text and code files show verbatim, and any other kind gets a download card. Set `ARTIFACTS_VIEWER_URL` (for example to the viewer's `*.ts.net` address) to make printed links open on your other devices.
 
 ### Share an artifact
 

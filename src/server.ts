@@ -79,7 +79,32 @@ const MIME: Record<string, string> = {
   ".woff": "font/woff",
   ".ttf": "font/ttf",
   ".otf": "font/otf",
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".wav": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".oga": "audio/ogg",
+  ".flac": "audio/flac",
+  ".csv": "text/csv; charset=utf-8",
+  ".tsv": "text/tab-separated-values; charset=utf-8",
+  ".vtt": "text/vtt; charset=utf-8",
+  ...Object.fromEntries(
+    [".txt", ".log", ".jsonl", ".yaml", ".yml", ".toml", ".xml", ".srt", ".diff", ".patch", ".sql",
+      ".ts", ".tsx", ".mjs", ".cjs", ".py", ".sh", ".rb", ".go", ".rs", ".swift"]
+      .map((ext) => [ext, "text/plain; charset=utf-8"]),
+  ),
 };
+
+/** Served as inert bytes: nothing in them should ever run or load anything. */
+const INERT_EXTENSIONS = new Set([
+  ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
+  ".mp4", ".m4v", ".mov", ".webm", ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".flac",
+]);
 
 // CSP for the viewer SPA itself. HTML artifacts are loaded via
 // <iframe src="/api/store/:id/..."> — that response carries its own CSP header
@@ -105,13 +130,10 @@ const PREVIEW_MIME = "image/webp";
 // Stored bundles are immutable: a re-submit writes a new rev with a new id.
 const IMMUTABLE_CACHE = "public, max-age=31536000, immutable";
 
-function send(
-  res: http.ServerResponse,
-  status: number,
-  body: string | Buffer,
-  headers: Record<string, string> = {},
-  opts: { csp?: string | null } = {},
-): void {
+function responseHeaders(
+  headers: Record<string, string>,
+  opts: { csp?: string | null },
+): Record<string, string> {
   const merged: Record<string, string> = {
     "content-type": "text/plain; charset=utf-8",
     "cache-control": "no-store",
@@ -123,8 +145,72 @@ function send(
   if (opts.csp === undefined) {
     if (!merged["content-security-policy"]) merged["content-security-policy"] = SPA_CSP;
   } else if (opts.csp !== null) merged["content-security-policy"] = opts.csp;
-  res.writeHead(status, merged);
+  return merged;
+}
+
+function send(
+  res: http.ServerResponse,
+  status: number,
+  body: string | Buffer,
+  headers: Record<string, string> = {},
+  opts: { csp?: string | null } = {},
+): void {
+  res.writeHead(status, responseHeaders(headers, opts));
   res.end(body);
+}
+
+/** Parse a single `bytes=` range. null = whole file, "bad" = unsatisfiable. */
+export function parseRange(header: string | undefined, size: number): { start: number; end: number } | null | "bad" {
+  if (!header) return null;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m || (!m[1] && !m[2])) return null; // multi-range or junk: serve it all
+  let start: number;
+  let end: number;
+  if (!m[1]) {
+    start = Math.max(0, size - Number(m[2]));
+    end = size - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+  }
+  if (start >= size || start > end) return "bad";
+  return { start, end };
+}
+
+/**
+ * Stream a file instead of buffering it, with byte-range support: Safari will
+ * not play a video without 206 responses, and a 1GB render should never sit
+ * in memory.
+ */
+function sendFile(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  absPath: string,
+  headers: Record<string, string>,
+  opts: { csp?: string | null } = {},
+): void {
+  const size = fs.statSync(absPath).size;
+  const range = parseRange(req.headers.range, size);
+  const base = responseHeaders({ ...headers, "accept-ranges": "bytes" }, opts);
+  if (range === "bad") {
+    res.writeHead(416, { ...base, "content-range": `bytes */${size}` });
+    res.end();
+    return;
+  }
+  const { start, end } = range ?? { start: 0, end: size - 1 };
+  const length = size === 0 ? 0 : end - start + 1;
+  res.writeHead(range ? 206 : 200, {
+    ...base,
+    "content-length": String(length),
+    ...(range ? { "content-range": `bytes ${start}-${end}/${size}` } : {}),
+  });
+  if (length === 0) {
+    res.end();
+    return;
+  }
+  const stream = fs.createReadStream(absPath, { start, end });
+  stream.on("error", () => res.destroy());
+  stream.pipe(res);
 }
 
 function sendJson(res: http.ServerResponse, body: unknown, headers: Record<string, string> = {}): void {
@@ -195,7 +281,7 @@ function isImageType(type: FeedEntry["type"]): boolean {
  * sanitizer fixes apply to already-stored artifacts); support files pass
  * through with a type-appropriate CSP.
  */
-function sendBundleFile(res: http.ServerResponse, absPath: string): void {
+function sendBundleFile(req: http.IncomingMessage, res: http.ServerResponse, absPath: string): void {
   if (!fs.existsSync(absPath) || fs.statSync(absPath).isDirectory()) {
     send(res, 404, "not found");
     return;
@@ -211,16 +297,11 @@ function sendBundleFile(res: http.ServerResponse, absPath: string): void {
     });
     return;
   }
-  const csp =
-    ext === ".pdf"
-      ? null
-      : ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".webp" || ext === ".gif" || ext === ".svg"
-        ? IMAGE_CSP
-        : undefined;
-  send(
+  const csp = ext === ".pdf" ? null : INERT_EXTENSIONS.has(ext) ? IMAGE_CSP : undefined;
+  sendFile(
+    req,
     res,
-    200,
-    fs.readFileSync(absPath),
+    absPath,
     {
       "content-type": MIME[ext] ?? "application/octet-stream",
       "content-disposition": "inline",
@@ -380,7 +461,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         send(res, 404, "not found");
         return;
       }
-      sendBundleFile(res, resolveBundleFile(entry, storeMatch[2] ?? ""));
+      sendBundleFile(req, res, resolveBundleFile(entry, storeMatch[2] ?? ""));
     } catch (e) {
       const code = e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500;
       send(res, code, (e as Error).message);
@@ -445,10 +526,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         return;
       }
       const basename = (entry.entry.split("/").pop() || entry.entry).replace(/[\r\n"\\]/g, "_");
-      send(
+      sendFile(
+        req,
         res,
-        200,
-        fs.readFileSync(absPath),
+        absPath,
         {
           "content-type": "application/octet-stream",
           "content-disposition": `attachment; filename="${basename}"`,

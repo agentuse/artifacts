@@ -5,7 +5,11 @@ export type ArtifactType =
   | "png"
   | "jpg"
   | "webp"
-  | "pdf";
+  | "pdf"
+  | "video"
+  | "audio"
+  | "text"
+  | "file";
 
 /** One submission, as returned by /api/feed and /api/entry/:id. */
 export interface FeedEntry {

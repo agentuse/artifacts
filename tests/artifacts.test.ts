@@ -30,3 +30,14 @@ it("links to the newest revision by project and slug", () => {
     "http://127.0.0.1:7878/p/proj_abc/weekly.dashboard",
   );
 });
+
+it("uses ARTIFACTS_VIEWER_URL for links that open on other devices", () => {
+  process.env.ARTIFACTS_VIEWER_URL = "https://artifacts.example.ts.net/";
+  try {
+    expect(viewerLatestUrl({ port: 7878 }, "proj_abc", "clip")).toBe(
+      "https://artifacts.example.ts.net/p/proj_abc/clip",
+    );
+  } finally {
+    delete process.env.ARTIFACTS_VIEWER_URL;
+  }
+});

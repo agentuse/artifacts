@@ -282,9 +282,9 @@ function SearchBox(props: { value: string; onChange: (value: string) => void }) 
 function Card(props: { entry: FeedEntry; showProject: boolean; onOpen: () => void }) {
   const { entry } = props;
   const { ref, seen } = useSeen<HTMLElement>();
-  // Images and HTML get a thumbnail above the title; text gets an excerpt
-  // below it, because a title under three lines of prose reads backwards.
-  const hasThumbnail = entry.type === "html" || isImageEntry(entry);
+  // Images, video and HTML get a thumbnail above the title; text gets an
+  // excerpt below it, because a title under three lines of prose reads backwards.
+  const hasThumbnail = entry.type === "html" || entry.type === "video" || isImageEntry(entry);
   const extraTags = entry.tags.length - CARD_TAGS;
 
   return (
@@ -293,12 +293,12 @@ function Card(props: { entry: FeedEntry; showProject: boolean; onOpen: () => voi
         {hasThumbnail && (
           <div className={"card-preview " + entry.type}>
             {seen ? <ArtifactPreview entry={entry} width={640} /> : null}
-            <span className="card-type">{typeLabel(entry.type)}</span>
+            <span className="card-type">{typeLabel(entry)}</span>
           </div>
         )}
         <span className="card-head">
           <h2 className="card-title">{entry.title}</h2>
-          {!hasThumbnail && <span className="card-type inline">{typeLabel(entry.type)}</span>}
+          {!hasThumbnail && <span className="card-type inline">{typeLabel(entry)}</span>}
         </span>
         {!hasThumbnail && seen && <ArtifactPreview entry={entry} width={640} />}
         <span className="card-meta">
