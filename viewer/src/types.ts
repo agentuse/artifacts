@@ -44,11 +44,22 @@ export interface FeedPage {
   facetTotals: { projects: number; tags: number };
 }
 
+/** A note the user left for the agent. Belongs to the artifact; `rev` is what they were viewing. */
+export interface Comment {
+  id: string;
+  rev: number;
+  body: string;
+  createdAt: string;
+  notifiedAt?: string;
+  resolvedAt?: string;
+}
+
 export interface EntryDetail {
   sharingEnabled?: boolean;
   sharing?: { state: "share" | "shared" | "update"; url?: string };
   entry: FeedEntry;
   revisions: FeedEntry[];
+  comments?: Comment[];
 }
 
 export interface ManagedShare {

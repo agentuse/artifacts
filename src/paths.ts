@@ -11,6 +11,10 @@ export function rootDir(): string {
 export function feedPath(): string {
   return path.join(rootDir(), "feed.jsonl");
 }
+/** Append-only comment log, kept apart so a feed entry stays a snapshot. */
+export function commentsPath(): string {
+  return path.join(rootDir(), "comments.jsonl");
+}
 /** Root of the copied artifact bundles: store/<projectId>/<slug>/<rev>/. */
 export function storeDir(): string {
   return path.join(rootDir(), "store");

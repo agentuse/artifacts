@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { addComment, commentsFor, commentsStamp, resolveComments } from "./comments.js";
 import { CliError } from "./errors.js";
 import {
   feedEntryRevisions,
@@ -13,6 +14,7 @@ import {
   readFeedEntries,
   type FeedEntry,
 } from "./feed.js";
+import { deliverPendingComments } from "./notify.js";
 import { previewCacheDir, rootDir, servePidPath } from "./paths.js";
 import { buildSafeSrcdoc, META_CSP } from "./sanitize.js";
 import { resolveBundleFile } from "./store.js";
@@ -226,6 +228,31 @@ function sendNotModified(res: http.ServerResponse, etag: string, cacheControl: s
   res.end();
 }
 
+/** Which pane and session made an artifact is the server's business, not the viewer's. */
+function publicEntry(entry: FeedEntry): Omit<FeedEntry, "origin"> {
+  const { origin: _origin, ...rest } = entry;
+  return rest;
+}
+
+const MAX_JSON_BODY_BYTES = 64 * 1024;
+
+async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_JSON_BODY_BYTES) throw new CliError("INVALID_INPUT", "Request is too large.");
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+  } catch {
+    /* reported below */
+  }
+  throw new CliError("INVALID_INPUT", "Request body must be a JSON object.");
+}
+
 function findEntry(id: string): FeedEntry | undefined {
   return readFeedEntries().find((e) => e.id === id);
 }
@@ -335,7 +362,7 @@ function serveStatic(res: http.ServerResponse, dir: string, file: string): void 
   });
 }
 
-async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dist: string }): Promise<void> {
+export async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts: { dist: string }): Promise<void> {
   const url = new URL(req.url ?? "/", `http://${HOST}`);
   const pathname = url.pathname;
 
@@ -374,6 +401,32 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
     return;
   }
 
+  // Comments wake an agent, so they sit behind the same same-origin gate as
+  // publishing: a cross-site page or a rebound host must never reach them.
+  const commentPost = /^\/api\/entry\/([A-Za-z0-9_]+)\/comments$/.exec(pathname);
+  const commentResolve = /^\/api\/comments\/(cmt_[a-f0-9]+)\/resolve$/.exec(pathname);
+  if ((commentPost || commentResolve) && req.method === "POST") {
+    if (!allowShareRequest(req)) {
+      send(res, 403, "Comments require a request from the local artifact viewer.");
+      return;
+    }
+    try {
+      if (commentResolve) {
+        const [comment] = resolveComments([commentResolve[1]!]);
+        sendJson(res, comment, { "cache-control": "no-store" });
+        return;
+      }
+      const entry = findEntry(commentPost![1]!);
+      if (!entry) { send(res, 404, "Artifact not found."); return; }
+      const { body } = await readJsonBody(req);
+      sendJson(res, addComment(entry, typeof body === "string" ? body : ""), { "cache-control": "no-store" });
+      kickCommentDelivery();
+    } catch (e) {
+      send(res, e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500, (e as Error).message);
+    }
+    return;
+  }
+
   // /api/feed -> newest-first page plus project/tag facets for the chips.
   if (pathname === "/api/feed" && req.method === "GET") {
     try {
@@ -401,7 +454,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         sendNotModified(res, etag, "no-store");
         return;
       }
-      sendJson(res, { ...page, entries }, { etag });
+      sendJson(res, { ...page, entries: entries.map(publicEntry) }, { etag });
     } catch (e) {
       send(res, 500, (e as Error).message);
     }
@@ -433,14 +486,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, opts:
         return;
       }
       const sharing = sharingState(entry);
-      const etag = etagOf(feedStamp(), entry.id, String(sharingEnabled), JSON.stringify(sharing));
+      const etag = etagOf(feedStamp(), commentsStamp(), entry.id, String(sharingEnabled), JSON.stringify(sharing));
       if (req.headers["if-none-match"] === etag) {
         sendNotModified(res, etag, "no-store");
         return;
       }
       sendJson(res, {
-        entry,
-        revisions: feedEntryRevisions(entries, entry.projectId, entry.slug),
+        entry: publicEntry(entry),
+        revisions: feedEntryRevisions(entries, entry.projectId, entry.slug).map(publicEntry),
+        comments: commentsFor(entry.projectId, entry.slug),
         sharingEnabled,
         sharing,
       }, { etag });
@@ -586,6 +640,7 @@ export async function startServer(opts: StartOptions): Promise<ServeStatus> {
   });
   const port = await listenWithFallback(server, opts.preferredPort);
   startShareSync();
+  startCommentDelivery();
   const rec: ServeStatus = {
     pid: process.pid,
     port,
@@ -641,6 +696,37 @@ function startShareSync(): void {
   };
   void tick();
   setInterval(() => void tick(), SHARE_SYNC_INTERVAL_MS).unref();
+}
+
+const COMMENT_DELIVERY_INTERVAL_MS = 30_000;
+let deliveryRunning = false;
+let deliveryAgain = false;
+
+/**
+ * Tell agents about comments waiting on their artifacts. Runs right after a new
+ * comment and on a timer, because an agent at an approval prompt can't take the
+ * message yet and a later revision can bring a new agent to notify.
+ */
+function kickCommentDelivery(): void {
+  if (deliveryRunning) {
+    deliveryAgain = true;
+    return;
+  }
+  deliveryRunning = true;
+  deliverPendingComments()
+    .catch((e: unknown) => console.error(`Could not notify agents about comments: ${(e as Error).message}`))
+    .finally(() => {
+      deliveryRunning = false;
+      if (deliveryAgain) {
+        deliveryAgain = false;
+        kickCommentDelivery();
+      }
+    });
+}
+
+function startCommentDelivery(): void {
+  kickCommentDelivery();
+  setInterval(kickCommentDelivery, COMMENT_DELIVERY_INTERVAL_MS).unref();
 }
 
 async function listenWithFallback(

@@ -6,6 +6,7 @@
 
 - **Any single file can be submitted.** Video (mp4, m4v, mov, webm) and audio (mp3, m4a, aac, wav, ogg, flac) play inline, with a video frame as the feed thumbnail. Text, code, and data files (txt, log, csv, json, yaml, srt, vtt, ts, py, ...) show verbatim with a short excerpt on the card. Anything else becomes a `file` entry with a download card instead of being refused.
 - Single files may be up to 2GB (directory bundles keep the 25MB cap). Bundle files are streamed with HTTP byte ranges, so Safari can play and seek large videos, and hashing reads in chunks instead of loading whole files.
+- **Comment on an artifact from the viewer and the agent that made it finds out.** Comments stay with the artifact across revisions. Agents read them with `artifacts comments [slug]`, close them with `artifacts resolve <id...>`, and see open ones every time they `submit`. An agent running in a Herdr pane also gets a short message pointing it at the new comment, with no setup; the comment text itself is never typed into the terminal.
 - `ARTIFACTS_VIEWER_URL` sets the origin of every printed link (for example the viewer's Tailscale address), so a link from `submit` opens on other devices.
 
 ### Unchanged on purpose

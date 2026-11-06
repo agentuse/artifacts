@@ -1,4 +1,4 @@
-import type { EntryDetail, FeedEntry, FeedPage } from "./types";
+import type { Comment, EntryDetail, FeedEntry, FeedPage } from "./types";
 
 export interface FeedFilter {
   projectId?: string;
@@ -116,6 +116,28 @@ export async function shareEntry(id: string): Promise<{ id: string; url: string 
     throw new Error("The sharing service returned an invalid link. Please retry.");
   }
   return { id: result.id, url: result.url };
+}
+
+/** Sends the same gate header as sharing: comments wake agents, so the same origin rules apply. */
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-artifacts-share": "1" },
+    body: JSON.stringify(body),
+  });
+  if (response.headers.get("content-type")?.includes("text/html")) {
+    throw new Error("The artifact server is out of date. Rebuild and restart it to enable comments.");
+  }
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<T>;
+}
+
+export function postComment(entryId: string, body: string): Promise<Comment> {
+  return postJson(`/api/entry/${encodeURIComponent(entryId)}/comments`, { body });
+}
+
+export function resolveComment(id: string): Promise<Comment> {
+  return postJson(`/api/comments/${encodeURIComponent(id)}/resolve`, {});
 }
 
 const managementHeaders = { "content-type": "application/json", "x-artifacts-share": "1" };

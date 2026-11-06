@@ -997,6 +997,50 @@ button, input { font: inherit; color: inherit; }
   font-size: 12px;
 }
 
+/* ----- Comments ----- */
+
+.comment-btn { position: relative; }
+.comment-count {
+  position: absolute;
+  top: 5px;
+  right: 3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+  text-align: center;
+}
+.comments-empty { margin: 16px 0; color: var(--muted); font-size: 14px; }
+.comment { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.comment:last-child { border-bottom: none; }
+.comment.resolved .comment-body { color: var(--muted); }
+.comment-body { margin: 0 0 6px; font-size: 15px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; color: var(--muted); font-size: 12px; }
+.comment-meta .link-btn { min-height: 44px; margin-left: auto; font-size: 14px; }
+.comment-form { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.comment-form textarea {
+  width: 100%;
+  min-height: 72px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+  font-size: 16px; /* Smaller makes iOS Safari zoom on focus. */
+  resize: vertical;
+}
+.comment-form textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+.comment-form-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.comment-error { margin: 0; color: #ef4444; font-size: 13px; }
+.comment-form .btn { min-height: 44px; margin-left: auto; }
+
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes sheet-in {
   from { opacity: 0; transform: translateY(24px); }

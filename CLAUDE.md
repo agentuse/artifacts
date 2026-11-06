@@ -36,6 +36,7 @@ Everything lives under `rootDir()` (default `~/.agentuse/artifacts/`, overridabl
 
 - `feed.jsonl`, the append-only submission log. One `FeedEntry` per line, oldest first. This is the source of truth for what exists.
 - `store/<projectId>/<slug>/<rev>/…`, the copied bundles. Immutable once written; a re-submit writes a new `<rev>`.
+- `comments.jsonl`, the append-only comment log (`src/comments.ts`). A comment's later state (`notified`, `resolved`) is another line, folded on read.
 - `preview-cache/`, generated WebP thumbnails, keyed by entry id + contentHash + width.
 - `.lock`, advisory lock for whole-file feed rewrites.
 - `.serve.pid`, JSON record of the running viewer server (pid + port + startedAt).
@@ -93,11 +94,28 @@ Note the ordering consequence: `submit` derives the project from the **target's*
 - `rev`, 1-based ordinal, zero-padded to 4 digits in the store path. Not a hash: hashing a whole directory per lookup is slow and the paths should stay human-readable.
 - `id`, `art_` + `sha16(projectId \0 slug \0 rev)`. Stable, so a deep link keeps working; and because it folds in `rev`, an entry id always names one immutable bundle. That is what lets `/api/store/:id/*` be `immutable`-cacheable.
 
+### Comments and telling the agent (`src/comments.ts`, `src/notify.ts`)
+
+A comment belongs to the artifact (project + slug), not a revision, so it carries over on resubmit; `rev` records what the user was viewing. It lives in its own log because a feed entry is an immutable snapshot.
+
+Agents find out three ways, none needing setup beyond the skill: `submit` prints open comments (the only channel every agent is guaranteed to hit), `artifacts comments` reads them on demand, and a Herdr notification wakes an idle agent. **Don't add agent hooks to this: installing them is a second setup step, and they still can't wake an idle agent.**
+
+`submit` records `origin` on the feed line (Herdr pane + agent session id) when it runs inside Herdr. `deliverPendingComments()` runs after each new comment and every 30s, and sends one fixed line per artifact to the newest revision's origin:
+- It re-reads the pane first. A closed pane or exited agent returns `agent_not_found`, and a new agent in the same pane has a different session id; either way nothing is sent. Pane ids alone are not proof.
+- A blocked agent refuses the message with `agent_blocked` and the timer retries. Comments older than 24h stop being retried.
+- **The comment body never goes into the terminal**, only a pointer to read it. Keep it that way: the agent should receive it as data it read, not as a prompt typed for it.
+- `origin` is stripped from every API response by `publicEntry()`. The viewer has no use for it and the tailnet shouldn't see it.
+
+Known gap: `herdr agent prompt` submits with Enter, so text someone has half-typed into that agent's input box goes along with the notification.
+
+Comment writes go through `allowShareRequest()`, because a forged comment could wake an agent and prompt-inject it.
+
 ### Viewer server (`src/server.ts`)
 
 Routes:
 - `GET /api/feed?project&tag&q&limit&cursor` -> a `FeedPage`: entries, `nextCursor`, `total`, and the project/tag facets. ETag is `sha(feedStamp + query)`, so the viewer's 5s poll is a conditional request that normally 304s.
-- `GET /api/entry/:id` -> `{ entry, revisions }` for the detail page. Same ETag scheme as the feed (`feedStamp` + id): the detail view polls this every 5s so a new revision shows up while you're on the page, and it 304s while nothing changes. The viewer auto-follows the newest revision only when the latest one is on screen; an explicitly opened older revision stays put.
+- `POST /api/entry/:id/comments` `{ body }` and `POST /api/comments/:id/resolve`, both gated like sharing.
+- `GET /api/entry/:id` -> `{ entry, revisions, comments }` for the detail page. Same ETag scheme as the feed (`feedStamp` + `commentsStamp` + id): the detail view polls this every 5s so a new revision shows up while you're on the page, and it 304s while nothing changes. The viewer auto-follows the newest revision only when the latest one is on screen; an explicitly opened older revision stays put.
 - `GET /api/store/:entryId/:path...` -> one file out of the stored bundle. An empty path serves the entry file. HTML is sanitized on every read; other types get a type-appropriate CSP. `cache-control: immutable` is safe here **only** because an entry id names one immutable revision.
 - `GET /api/preview/:entryId?w=` -> cached WebP thumbnail for image entries. 400 for non-images.
 - `GET /api/raw/:entryId` -> the entry file exactly as submitted, `application/octet-stream` + `Content-Disposition: attachment` (powers Download / Copy content; never rendered inline).
@@ -141,14 +159,14 @@ When modifying sanitization: do not switch to regex; do not relax `connect-src` 
 ### Viewer SPA (`viewer/src/`)
 
 - React 18 + Vite, no router library. Routing is a hand-rolled `parseRoute` / `routePath` over `window.location` in `App.tsx`. Routes: `/` (feed), `/p/:projectId/:slug` (the artifact: always its newest revision), and `/a/:entryId` (one specific older revision). The newest revision is always shown at `/p/...`, so the address bar holds the permalink and "Copy link" (which copies `location.href`) hands out a link that keeps working as the artifact is re-submitted: feed cards and the newest revision chip open it, and an `/a/:id` that turns out to be the newest is swapped for it on load. A `/p` page follows new revisions on its own because the server resolves it on every poll. `submit` prints the permalink as `url` (`revisionUrl` in `--json` is the `/a/:id` one). Filter state lives in the query string (`?project=&tag=&q=`) so a filtered feed is linkable and survives reload.
-- Files: `App.tsx` (routing + polling + pagination), `components/Feed.tsx` (header, filter bar, sidebar, cards), `components/FilterSheet.tsx` (phone project/tag picker), `components/Detail.tsx` (one-row header, actions menu, old-revision bar, full screen), `components/DetailsSheet.tsx` (revisions, project, tags, size), `components/Render.tsx` (all artifact bodies and card previews), `components/RelativeTime.tsx`, `frontmatter.ts`.
+- Files: `App.tsx` (routing + polling + pagination), `components/Feed.tsx` (header, filter bar, sidebar, cards), `components/FilterSheet.tsx` (phone project/tag picker), `components/Detail.tsx` (one-row header, actions menu, old-revision bar, full screen), `components/DetailsSheet.tsx` (revisions, project, tags, size), `components/CommentsSheet.tsx` (comment list and composer), `components/Render.tsx` (all artifact bodies and card previews), `components/RelativeTime.tsx`, `frontmatter.ts`.
 - The feed polls `/api/feed` every 5s with an `if-none-match`; a 304 costs one request and no re-render. When the log *does* change, pagination resets to page one, new artifacts belong at the top, and splicing them into a scrolled list reads as a jump.
 - **Card previews are lazy and mount once.** `useSeen` (IntersectionObserver, 400px rootMargin) gates them, and the flag never flips back, so scrolling away doesn't tear down a rendered preview. Without this a long feed mounts one iframe per HTML card at once. Note when screenshotting: `Page.captureScreenshot` with `captureBeyondViewport` does not paint off-screen iframes, so a blank card in a full-page capture is usually the capture, not a bug, scroll it into the viewport and take a normal shot.
 - Card layout differs by type: images and HTML get a thumbnail above the title; markdown gets a three-line text excerpt below it (a title under three lines of prose reads backwards).
 - **Filters are one responsive layout, broken at 800px.** On a phone: two buttons (project, tag) that each open `FilterSheet`, a bottom-sheet radio list that applies on tap and closes. From 800px: `SideFilters` keeps projects (top 6) and tags (top 12) in view, each with "Show all", and the cards become an auto-fill grid (min 280px columns). Card metadata is one non-interactive mono line plus at most two tags: filtering only happens through the filter controls, because tappable chips inside a card were a mis-tap magnet on a phone. Don't bring back the horizontally scrolling chip row: with ~60 tags it was unusable. "N of M" uses `page.all` as M. `/` focuses search.
 - **The feed header hides on scroll down and returns on scroll up, at phone widths only** (`useAutoHide`, CSS under `max-width: 799px`); an open filter sheet pins it.
 - **The detail page uses an explicit Full screen toggle instead** (title-bar button; a floating exit button and Esc bring the header back). Hide-on-scroll was tried there and dropped: HTML artifacts scroll inside their iframe in every direction (wide tables, dashboards), so the `agentuse:scroll` signal kept hiding the header at the wrong moment. Full screen keeps `ArtifactBody` in the same child slot so the iframe never remounts and keeps its scroll position.
-- **The detail header is one row** (back, title block, share, full screen, more). The two-line title block (title; `rev N · age`, plus project and tags from 800px) is a button that opens `DetailsSheet`, which holds what used to be two always-visible chip rows: revisions (Latest / Shared markers) and project, tags, type, size. An older revision gets an amber `rev N of M` and an "Older revision. It won't update." bar with Go to latest, since links follow the newest revision everywhere else. On a phone the share control shrinks to its icon and the actions menu becomes a bottom sheet.
+- **The detail header is one row** (back, title block, share, comments, full screen, more). The two-line title block (title; `rev N · age`, plus project and tags from 800px) is a button that opens `DetailsSheet`, which holds what used to be two always-visible chip rows: revisions (Latest / Shared markers) and project, tags, type, size. An older revision gets an amber `rev N of M` and an "Older revision. It won't update." bar with Go to latest, since links follow the newest revision everywhere else. On a phone the share control shrinks to its icon and the actions menu becomes a bottom sheet.
 - Markdown is fetched from the bundle route; leading YAML-style frontmatter is parsed client-side into a metadata panel, then the body renders with `react-markdown` + `remark-gfm` + `remark-breaks` + `rehype-highlight`. `remark-breaks` makes single newlines render as `<br>` (GitHub-comment style) because agent-emitted markdown often uses single newlines instead of blank-line paragraph breaks. Relative image `src`s are rewritten against the entry file's directory inside the bundle.
 - Mobile is the primary target: single column, 44px minimum touch targets, 16px inputs (smaller makes iOS Safari zoom on focus), safe-area insets, and pinch-zoom left enabled in `index.html` (the old pan/zoom canvas is why it used to be disabled).
 

@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { commentsFor, openCommentsFor, resolveComments, type Comment } from "./comments.js";
 import { CliError, ErrorEnvelope, envelope, exitCodeFor } from "./errors.js";
 import { viewerEntryUrl, viewerFeedUrl, viewerLatestUrl } from "./artifacts.js";
 import { queryFeed, type FeedEntry } from "./feed.js";
@@ -54,6 +55,15 @@ function fmtEntry(entry: FeedEntry): string {
   return `  ${entry.submittedAt}  ${entry.projectName}  ${entry.title}${tags}  (${entry.id})`;
 }
 
+function printComments(comments: Comment[]): void {
+  for (const c of comments) {
+    const state = c.resolvedAt ? ", resolved" : "";
+    human(`  ${c.id} on ${c.slug} (rev ${c.rev}${state}):`);
+    for (const line of c.body.split("\n")) human(`    ${line}`);
+  }
+  if (comments.some((c) => !c.resolvedAt)) human(`  When you have dealt with one, run: artifacts resolve <id>`);
+}
+
 function currentPort(): number {
   return isServerRunning()?.port ?? DEFAULT_PORT;
 }
@@ -100,10 +110,17 @@ export async function runCli(argv: string[]): Promise<void> {
         const url = viewerLatestUrl({ port: currentPort() }, result.entry.projectId, result.entry.slug);
         const revisionUrl = viewerEntryUrl({ port: currentPort() }, result.entry.id);
         if (opts.open && !global.json) openBrowser(url);
-        emit(global.json, { ...result, url, revisionUrl }, () => {
+        // Resubmitting is when an agent is working on this artifact, so this is
+        // the one place every agent is guaranteed to see what the user asked for.
+        const openComments = openCommentsFor(result.entry.projectId, result.entry.slug);
+        emit(global.json, { ...result, url, revisionUrl, openComments }, () => {
           const what = result.deduped ? "unchanged" : `rev ${result.entry.rev}`;
           human(`✓ ${result.entry.title} (${what})`);
           human(`  ${url}`);
+          if (openComments.length) {
+            human(`  Open comments from the user:`);
+            printComments(openComments);
+          }
         });
       } catch (e) {
         fail(global.json, e);
@@ -135,6 +152,43 @@ export async function runCli(argv: string[]): Promise<void> {
           for (const entry of page.entries) human(fmtEntry(entry));
           human(`  — ${page.entries.length} of ${page.total}`);
         });
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  program
+    .command("comments")
+    .description("List open comments the user left on an artifact, or on every artifact in this project")
+    .argument("[slug]", "only this artifact")
+    .option("--project <projectId>", "project (default: the current directory's)")
+    .option("--all", "include resolved comments")
+    .action((slug: string | undefined, opts: { project?: string; all?: boolean }) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const projectId = opts.project ?? resolveProject().projectId;
+        const comments = opts.all ? commentsFor(projectId, slug) : openCommentsFor(projectId, slug);
+        emit(global.json, { projectId, comments }, () => {
+          if (!comments.length) {
+            human(opts.all ? "(no comments)" : "(no open comments)");
+            return;
+          }
+          printComments(comments);
+        });
+      } catch (e) {
+        fail(global.json, e);
+      }
+    });
+
+  program
+    .command("resolve")
+    .description("Mark comments as dealt with")
+    .argument("<id...>", "comment ids from `artifacts comments`")
+    .action((ids: string[]) => {
+      const global = program.opts<GlobalOpts>();
+      try {
+        const comments = resolveComments(ids);
+        emit(global.json, { comments }, () => human(`✓ resolved ${comments.length} comment(s)`));
       } catch (e) {
         fail(global.json, e);
       }

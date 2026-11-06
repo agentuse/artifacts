@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, ChevronDown, Cloud, Copy, Download, FileText, History, Link, Maximize2, Minimize2, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Cloud, Copy, Download, FileText, History, Link, Maximize2, MessageSquare, Minimize2, MoreHorizontal } from "lucide-react";
 import { bundleUrl, fetchEntry, latestTarget, rawUrl, targetPath, type EntryTarget } from "../api";
 import { ArtifactBody, isPlainTextEntry, isTextEntry } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import { ShareButton } from "./ShareButton";
 import { DetailsSheet } from "./DetailsSheet";
-import type { EntryDetail, FeedEntry } from "../types";
+import { CommentsSheet } from "./CommentsSheet";
+import type { Comment, EntryDetail, FeedEntry } from "../types";
 
 const POLL_MS = 5_000;
 
@@ -26,6 +27,9 @@ export function Detail(props: {
   // guessing intent from that kept hiding the header at the wrong moment.
   const [fullscreen, setFullscreen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  // Kept here so closing the sheet by accident doesn't lose what was typed.
+  const [commentDraft, setCommentDraft] = useState("");
   // Ref so the poll effect doesn't restart when the parent re-renders and
   // hands down a fresh callback identity.
   const onOpenTargetRef = useRef(props.onOpenTarget);
@@ -79,8 +83,8 @@ export function Detail(props: {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // The details sheet is a modal <dialog>: Escape closes it natively.
-      if (detailsOpen) return;
+      // The sheets are modal <dialog>s: Escape closes them natively.
+      if (detailsOpen || commentsOpen) return;
       if (menuOpen) {
         setMenuOpen(false);
         return;
@@ -93,7 +97,7 @@ export function Detail(props: {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen, fullscreen, detailsOpen, onBack]);
+  }, [menuOpen, fullscreen, detailsOpen, commentsOpen, onBack]);
 
   if (error) {
     return (
@@ -118,6 +122,19 @@ export function Detail(props: {
   }
 
   const { entry, revisions } = detail;
+  const comments = detail.comments ?? [];
+  // Show the server's answer now rather than on the next poll.
+  const applyComment = (comment: Comment) =>
+    setDetail((d) => {
+      if (!d) return d;
+      const list = d.comments ?? [];
+      return {
+        ...d,
+        comments: list.some((c) => c.id === comment.id)
+          ? list.map((c) => (c.id === comment.id ? comment : c))
+          : [...list, comment],
+      };
+    });
   const latest = revisions[0] ?? entry;
   const isLatest = latest.id === entry.id;
   const openRevision = (rev: FeedEntry) =>
@@ -145,6 +162,11 @@ export function Detail(props: {
             }}
             sharingEnabled={detail.sharingEnabled === true}
             sharing={detail.sharing}
+            openComments={comments.filter((c) => !c.resolvedAt).length}
+            onComments={() => {
+              setMenuOpen(false);
+              setCommentsOpen(true);
+            }}
             menuOpen={menuOpen}
             onMenuOpenChange={setMenuOpen}
             onFullscreen={() => {
@@ -190,6 +212,16 @@ export function Detail(props: {
           onClose={() => setDetailsOpen(false)}
         />
       ) : null}
+      {commentsOpen ? (
+        <CommentsSheet
+          entry={entry}
+          comments={comments}
+          draft={commentDraft}
+          onDraftChange={setCommentDraft}
+          onChanged={applyComment}
+          onClose={() => setCommentsOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -203,6 +235,8 @@ function DetailHead(props: {
   onDetails?: () => void;
   sharingEnabled?: boolean;
   sharing?: { state: "share" | "shared" | "update"; url?: string };
+  openComments?: number;
+  onComments?: () => void;
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
   onFullscreen?: () => void;
@@ -242,6 +276,18 @@ function DetailHead(props: {
         <h1 className="detail-title plain">{props.title}</h1>
       )}
       {entry && props.sharingEnabled && <ShareButton key={entry.id} entryId={entry.id} sharing={props.sharing} />}
+      {props.onComments && (
+        <button
+          type="button"
+          className="icon-btn comment-btn"
+          onClick={props.onComments}
+          aria-label={props.openComments ? `Comments, ${props.openComments} open` : "Comments"}
+          title="Comments"
+        >
+          <MessageSquare size={18} strokeWidth={1.75} />
+          {props.openComments ? <span className="comment-count" aria-hidden="true">{props.openComments}</span> : null}
+        </button>
+      )}
       {props.onFullscreen && (
         <button type="button" className="icon-btn" onClick={props.onFullscreen} aria-label="Full screen" title="Full screen">
           <Maximize2 size={18} strokeWidth={1.75} />

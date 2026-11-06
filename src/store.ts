@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseHtml } from "node-html-parser";
+import { dropProjectComments } from "./comments.js";
 import { CliError } from "./errors.js";
 import {
   appendFeedEntry,
@@ -14,6 +15,7 @@ import {
 } from "./feed.js";
 import { readImageDims } from "./imageDims.js";
 import { withLock } from "./lock.js";
+import { captureOrigin } from "./notify.js";
 import { storeDir } from "./paths.js";
 import { resolveProject } from "./project.js";
 import { inferFileType, inferType, type ArtifactType } from "./validation.js";
@@ -114,6 +116,7 @@ export async function submitArtifact(opts: SubmitOptions): Promise<SubmitResult>
   }
 
   const rev = nextRevision(existing, project.projectId, slug);
+  const origin = captureOrigin();
   const entry: FeedEntry = {
     id: entryId(project.projectId, slug, rev),
     projectId: project.projectId,
@@ -130,6 +133,7 @@ export async function submitArtifact(opts: SubmitOptions): Promise<SubmitResult>
     sourcePath: abs,
     submittedAt: new Date().toISOString(),
     ...imageDimsFor(entryType, entryAbs),
+    ...(origin ? { origin } : {}),
   };
 
   copyBundle(files, path.join(storeDir(), entryStoreRel(entry)));
@@ -223,6 +227,7 @@ export async function forgetProjectArtifacts(projectId: string): Promise<number>
       throw new CliError("INVALID_INPUT", `no artifacts from project: ${projectId}`);
     }
     writeFeedAtomic(keep);
+    dropProjectComments(projectId);
   });
   rmDir(path.join(storeDir(), projectId));
   return dropped;

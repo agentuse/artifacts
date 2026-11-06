@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CliError } from "./errors.js";
 import { feedPath, rootDir } from "./paths.js";
+import type { AgentOrigin } from "./notify.js";
 import type { ArtifactType } from "./validation.js";
 
 /**
@@ -30,6 +31,8 @@ export interface FeedEntry {
   submittedAt: string;
   naturalWidth?: number;
   naturalHeight?: number;
+  /** The agent that submitted this revision, when it can be reached later. Never sent to the viewer. */
+  origin?: AgentOrigin;
 }
 
 export interface FeedQuery {
@@ -83,12 +86,17 @@ export function normalizeTags(input: readonly string[]): string[] {
  * taking the registry lock — an interleaved write can never split a line.
  */
 export function appendFeedEntry(entry: FeedEntry): void {
+  appendJsonLine(feedPath(), entry, "feed entry too large");
+}
+
+/** The atomic append behind every log in the store. */
+export function appendJsonLine(file: string, value: unknown, tooLarge: string): void {
   fs.mkdirSync(rootDir(), { recursive: true });
-  const line = JSON.stringify(entry) + "\n";
+  const line = JSON.stringify(value) + "\n";
   if (Buffer.byteLength(line) > 8192) {
-    throw new CliError("INVALID_INPUT", "feed entry too large");
+    throw new CliError("INVALID_INPUT", tooLarge);
   }
-  const fd = fs.openSync(feedPath(), "a");
+  const fd = fs.openSync(file, "a");
   try {
     fs.writeSync(fd, line);
     fs.fsyncSync(fd);
