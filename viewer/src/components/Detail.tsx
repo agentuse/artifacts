@@ -5,7 +5,8 @@ import { ArtifactBody, isPlainTextEntry, isTextEntry } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import { ShareButton } from "./ShareButton";
 import { DetailsSheet } from "./DetailsSheet";
-import { CommentsSheet } from "./CommentsSheet";
+import { CommentsSheet, type PendingQuote } from "./CommentsSheet";
+import { SelectionComment } from "./SelectionComment";
 import type { Comment, EntryDetail, FeedEntry } from "../types";
 
 const POLL_MS = 5_000;
@@ -30,6 +31,7 @@ export function Detail(props: {
   const [commentsOpen, setCommentsOpen] = useState(false);
   // Kept here so closing the sheet by accident doesn't lose what was typed.
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentQuote, setCommentQuote] = useState<PendingQuote | null>(null);
   // Ref so the poll effect doesn't restart when the parent re-renders and
   // hands down a fresh callback identity.
   const onOpenTargetRef = useRef(props.onOpenTarget);
@@ -199,6 +201,14 @@ export function Detail(props: {
         </button>
       ) : null}
       <ArtifactBody entry={entry} />
+      <SelectionComment
+        disabled={commentsOpen || detailsOpen}
+        onComment={(quote) => {
+          setMenuOpen(false);
+          setCommentQuote({ quote, entryId: entry.id });
+          setCommentsOpen(true);
+        }}
+      />
       {detailsOpen ? (
         <DetailsSheet
           entry={entry}
@@ -218,6 +228,8 @@ export function Detail(props: {
           comments={comments}
           draft={commentDraft}
           onDraftChange={setCommentDraft}
+          pendingQuote={commentQuote}
+          onClearQuote={() => setCommentQuote(null)}
           onChanged={applyComment}
           onClose={() => setCommentsOpen(false)}
         />

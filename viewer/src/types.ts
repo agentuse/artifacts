@@ -45,10 +45,17 @@ export interface FeedPage {
 }
 
 /** A note the user left for the agent. Belongs to the artifact; `rev` is what they were viewing. */
+export interface CommentQuote {
+  text: string;
+  before?: string;
+  after?: string;
+}
+
 export interface Comment {
   id: string;
   rev: number;
   body: string;
+  quote?: CommentQuote;
   createdAt: string;
   notifiedAt?: string;
   resolvedAt?: string;

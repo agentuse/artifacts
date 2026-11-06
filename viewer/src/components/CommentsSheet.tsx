@@ -1,12 +1,46 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { X } from "lucide-react";
 import { postComment, resolveComment } from "../api";
 import { RelativeTime } from "./RelativeTime";
-import type { Comment, FeedEntry } from "../types";
+import type { Comment, CommentQuote, FeedEntry } from "../types";
+
+/**
+ * A highlighted passage waiting to be sent. It remembers its revision so the
+ * comment says what the user was reading, even if a new one arrives meanwhile.
+ */
+export interface PendingQuote {
+  quote: CommentQuote;
+  entryId: string;
+}
 
 function commentStatus(comment: Comment): string {
   if (comment.resolvedAt) return "Resolved";
   return comment.notifiedAt ? "Agent notified" : "Waiting for the agent";
+}
+
+/**
+ * iOS keeps the page full height under the on-screen keyboard, so a sheet
+ * anchored to the bottom of the screen sits behind it. Follow the visible area
+ * instead while the keyboard is up.
+ */
+function useKeyboardAvoidance(): CSSProperties | undefined {
+  const [style, setStyle] = useState<CSSProperties>();
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () => {
+      const covered = Math.round(window.innerHeight - viewport.height - viewport.offsetTop);
+      setStyle(covered > 0 ? { bottom: covered, maxHeight: Math.round(viewport.height) - 8 } : undefined);
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, []);
+  return style;
 }
 
 /** Notes for the agent that made this artifact. They carry over to new revisions. */
@@ -15,15 +49,23 @@ export function CommentsSheet(props: {
   comments: Comment[];
   draft: string;
   onDraftChange: (draft: string) => void;
+  pendingQuote: PendingQuote | null;
+  onClearQuote: () => void;
   onChanged: (comment: Comment) => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const keyboardStyle = useKeyboardAvoidance();
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     dialog.current?.showModal();
+    // showModal focuses the close button. Arriving from a highlight means the
+    // next thing to do is type; opening from the header might only be to read.
+    if (props.pendingQuote) textarea.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const send = async (e?: FormEvent) => {
@@ -32,8 +74,10 @@ export function CommentsSheet(props: {
     setSending(true);
     setError(null);
     try {
-      props.onChanged(await postComment(props.entry.id, props.draft));
+      const pending = props.pendingQuote;
+      props.onChanged(await postComment(pending?.entryId ?? props.entry.id, props.draft, pending?.quote));
       props.onDraftChange("");
+      props.onClearQuote();
     } catch (err) {
       // The draft stays put so nothing typed is lost.
       setError((err as Error).message);
@@ -55,6 +99,7 @@ export function CommentsSheet(props: {
     <dialog
       className="sheet details-sheet comments-sheet"
       ref={dialog}
+      style={keyboardStyle}
       aria-labelledby="comments-sheet-heading"
       onCancel={props.onClose}
       onClick={(e) => {
@@ -71,10 +116,11 @@ export function CommentsSheet(props: {
 
       <div className="sheet-list">
         {props.comments.length === 0 ? (
-          <p className="comments-empty">Tell the agent what to change. It sees comments when it next works on this artifact.</p>
+          props.pendingQuote ? null : <p className="comments-empty">Tell the agent what to change. It sees comments when it next works on this artifact.</p>
         ) : (
           props.comments.map((comment) => (
             <article key={comment.id} className={"comment" + (comment.resolvedAt ? " resolved" : "")}>
+              {comment.quote ? <blockquote className="comment-quote">{comment.quote.text}</blockquote> : null}
               <p className="comment-body">{comment.body}</p>
               <div className="comment-meta">
                 <span>{commentStatus(comment)}</span>
@@ -94,13 +140,22 @@ export function CommentsSheet(props: {
       </div>
 
       <form className="comment-form" onSubmit={(e) => void send(e)}>
+        {props.pendingQuote ? (
+          <div className="comment-pending-quote">
+            <blockquote className="comment-quote">{props.pendingQuote.quote.text}</blockquote>
+            <button type="button" className="icon-btn" onClick={props.onClearQuote} aria-label="Remove highlighted text">
+              <X size={16} />
+            </button>
+          </div>
+        ) : null}
         <textarea
+          ref={textarea}
           value={props.draft}
           onChange={(e) => props.onDraftChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send();
           }}
-          placeholder="Add a comment"
+          placeholder={props.pendingQuote ? "Comment on this passage" : "Add a comment"}
           aria-label="Add a comment"
           rows={3}
         />

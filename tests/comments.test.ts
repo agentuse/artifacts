@@ -53,6 +53,32 @@ describe("comments", () => {
     expect(readComments()).toEqual([]);
   });
 
+  it("keeps a highlighted passage with its context", () => {
+    const comment = addComment(entry, "too strong", { text: " Churn is flat. ", before: "Risks ", after: " Next", junk: 1 });
+    expect(comment.quote).toEqual({ text: "Churn is flat.", before: "Risks ", after: " Next" });
+    expect(readComments()[0]?.quote).toEqual(comment.quote);
+    expect(addComment(entry, "whole thing").quote).toBeUndefined();
+  });
+
+  it("refuses an empty, malformed or oversized passage", () => {
+    expect(() => addComment(entry, "x", { text: "   " })).toThrow("empty");
+    expect(() => addComment(entry, "x", "just a string")).toThrow("empty");
+    expect(() => addComment(entry, "x", { text: "y".repeat(3073) })).toThrow("too long");
+    expect(readComments()).toEqual([]);
+  });
+
+  it("keeps terminal escape codes out of what agents will print", () => {
+    const comment = addComment(entry, "a\x1b[2Jb\nc", { text: "q\x1b]0;evil\x07r", before: "\x1b[31mred" });
+    expect(comment.body).toBe("a[2Jb\nc");
+    expect(comment.quote).toEqual({ text: "q]0;evilr", before: "[31mred" });
+  });
+
+  it("drops a hand-edited quote the viewer could not render", () => {
+    addComment(entry, "kept");
+    fs.appendFileSync(commentsPath(), JSON.stringify({ type: "comment", id: "cmt_b", projectId: "proj_a", slug: "report", rev: 1, body: "b", createdAt: "2026-01-01", quote: { text: 5 } }) + "\n");
+    expect(readComments().find((c) => c.id === "cmt_b")?.quote).toBeUndefined();
+  });
+
   it("skips malformed lines instead of failing", () => {
     const comment = addComment(entry, "kept");
     fs.appendFileSync(commentsPath(), 'not json\n{"type":"comment","id":5}\n');

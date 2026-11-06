@@ -1015,6 +1015,40 @@ button, input { font: inherit; color: inherit; }
   line-height: 16px;
   text-align: center;
 }
+.selection-comment {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  transform: translateX(-50%);
+  border-color: var(--accent);
+  background: var(--bg);
+  color: var(--accent);
+  box-shadow: var(--shadow-float);
+  animation: fade-in 120ms ease both;
+}
+.comment-quote {
+  display: -webkit-box;
+  margin: 0 0 8px;
+  padding: 2px 0 2px 10px;
+  overflow: hidden;
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+.comment-pending-quote { display: flex; align-items: flex-start; gap: 4px; }
+.comment-pending-quote .comment-quote { flex: 1; min-width: 0; margin: 0; }
+.comment-pending-quote .icon-btn { flex-shrink: 0; margin-top: -8px; }
 .comments-empty { margin: 16px 0; color: var(--muted); font-size: 14px; }
 .comment { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .comment:last-child { border-bottom: none; }

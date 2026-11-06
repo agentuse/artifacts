@@ -1,4 +1,4 @@
-import type { Comment, EntryDetail, FeedEntry, FeedPage } from "./types";
+import type { Comment, CommentQuote, EntryDetail, FeedEntry, FeedPage } from "./types";
 
 export interface FeedFilter {
   projectId?: string;
@@ -132,8 +132,8 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function postComment(entryId: string, body: string): Promise<Comment> {
-  return postJson(`/api/entry/${encodeURIComponent(entryId)}/comments`, { body });
+export function postComment(entryId: string, body: string, quote?: CommentQuote): Promise<Comment> {
+  return postJson(`/api/entry/${encodeURIComponent(entryId)}/comments`, { body, quote });
 }
 
 export function resolveComment(id: string): Promise<Comment> {

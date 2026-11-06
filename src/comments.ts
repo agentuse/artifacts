@@ -10,12 +10,21 @@ import { commentsPath } from "./paths.js";
  * looking at. The log is append-only like the feed: a comment's later state is
  * another line, folded on read, so concurrent agents never need the lock.
  */
+export interface CommentQuote {
+  /** As rendered in the viewer, so markdown markers like ** may be missing from it. */
+  text: string;
+  before?: string;
+  after?: string;
+}
+
 export interface Comment {
   id: string;
   projectId: string;
   slug: string;
   rev: number;
   body: string;
+  /** The passage the user highlighted, when the comment is about one. */
+  quote?: CommentQuote;
   createdAt: string;
   /** The agent accepted a message saying this comment exists. */
   notifiedAt?: string;
@@ -27,6 +36,31 @@ type CommentLine =
   | { type: "notified" | "resolved"; id: string; at: string };
 
 const MAX_COMMENT_BYTES = 4096;
+const MAX_QUOTE_BYTES = 3072;
+const MAX_CONTEXT_CHARS = 200;
+
+/** Comments and quotes get printed to agents' terminals; keep escape codes out of them. */
+function stripControls(text: string): string {
+  return text.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+}
+
+function cleanContext(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return stripControls(value).slice(0, MAX_CONTEXT_CHARS) || undefined;
+}
+
+function cleanQuote(raw: unknown): CommentQuote | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const quote = raw as Partial<Record<keyof CommentQuote, unknown>>;
+  const text = typeof quote.text === "string" ? stripControls(quote.text).trim() : "";
+  if (!text) throw new CliError("INVALID_INPUT", "The highlighted text is empty.");
+  if (Buffer.byteLength(text) > MAX_QUOTE_BYTES) {
+    throw new CliError("INVALID_INPUT", "The highlighted text is too long.");
+  }
+  const before = cleanContext(quote.before);
+  const after = cleanContext(quote.after);
+  return { text, ...(before ? { before } : {}), ...(after ? { after } : {}) };
+}
 
 export function commentsStamp(): string {
   const file = commentsPath();
@@ -46,7 +80,9 @@ function parseLine(raw: string): CommentLine | undefined {
       const valid = typeof line.id === "string" && typeof line.projectId === "string" &&
         typeof line.slug === "string" && typeof line.rev === "number" &&
         typeof line.body === "string" && typeof line.createdAt === "string";
-      return valid ? line : undefined;
+      if (!valid) return undefined;
+      if (typeof line.quote?.text !== "string") delete line.quote;
+      return line;
     }
     if (line.type === "notified" || line.type === "resolved") {
       return typeof line.id === "string" && typeof line.at === "string" ? line : undefined;
@@ -93,18 +129,24 @@ export function openCommentsFor(projectId: string, slug?: string): Comment[] {
   return commentsFor(projectId, slug).filter((c) => !c.resolvedAt);
 }
 
-export function addComment(entry: Pick<FeedEntry, "projectId" | "slug" | "rev">, rawBody: string): Comment {
-  const body = rawBody.trim();
+export function addComment(
+  entry: Pick<FeedEntry, "projectId" | "slug" | "rev">,
+  rawBody: string,
+  rawQuote?: unknown,
+): Comment {
+  const body = stripControls(rawBody).trim();
   if (!body) throw new CliError("INVALID_INPUT", "Write a comment first.");
   if (Buffer.byteLength(body) > MAX_COMMENT_BYTES) {
     throw new CliError("INVALID_INPUT", "That comment is too long. The limit is 4 KB.");
   }
+  const quote = cleanQuote(rawQuote);
   const comment: Comment = {
     id: `cmt_${randomBytes(8).toString("hex")}`,
     projectId: entry.projectId,
     slug: entry.slug,
     rev: entry.rev,
     body,
+    ...(quote ? { quote } : {}),
     createdAt: new Date().toISOString(),
   };
   appendJsonLine(commentsPath(), { type: "comment", ...comment }, "That comment is too long.");

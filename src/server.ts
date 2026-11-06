@@ -418,8 +418,8 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
       }
       const entry = findEntry(commentPost![1]!);
       if (!entry) { send(res, 404, "Artifact not found."); return; }
-      const { body } = await readJsonBody(req);
-      sendJson(res, addComment(entry, typeof body === "string" ? body : ""), { "cache-control": "no-store" });
+      const { body, quote } = await readJsonBody(req);
+      sendJson(res, addComment(entry, typeof body === "string" ? body : "", quote), { "cache-control": "no-store" });
       kickCommentDelivery();
     } catch (e) {
       send(res, e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500, (e as Error).message);

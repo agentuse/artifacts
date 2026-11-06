@@ -59,6 +59,10 @@ function printComments(comments: Comment[]): void {
   for (const c of comments) {
     const state = c.resolvedAt ? ", resolved" : "";
     human(`  ${c.id} on ${c.slug} (rev ${c.rev}${state}):`);
+    if (c.quote) {
+      const passage = `${c.quote.before ? `…${c.quote.before}` : ""}[[${c.quote.text}]]${c.quote.after ? `${c.quote.after}…` : ""}`;
+      human(`    About this passage: ${passage.replace(/\s*\n\s*/g, " ")}`);
+    }
     for (const line of c.body.split("\n")) human(`    ${line}`);
   }
   if (comments.some((c) => !c.resolvedAt)) human(`  When you have dealt with one, run: artifacts resolve <id>`);

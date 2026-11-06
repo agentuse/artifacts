@@ -59,6 +59,12 @@ describe("comment routes", () => {
     expect((await resolved.json()).resolvedAt).toBeTruthy();
   });
 
+  it("saves a highlighted passage and rejects a bad one", async () => {
+    const created = await post("/api/entry/art_1/comments", { body: "too strong", quote: { text: "Churn is flat.", before: "Risks" } });
+    expect(await created.json()).toMatchObject({ quote: { text: "Churn is flat.", before: "Risks" } });
+    expect((await post("/api/entry/art_1/comments", { body: "x", quote: { text: " " } })).status).toBe(400);
+  });
+
   it("refuses cross-site, rebound and headerless writes", async () => {
     const attempts: Array<Record<string, string>> = [
       { ...allowed, origin: "https://evil.example" },
