@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { viewerEntryUrl, viewerFeedUrl, viewerLatestUrl } from "../src/artifacts";
+
+// A machine with this set would otherwise fail every loopback assertion below.
+beforeEach(() => {
+  delete process.env.ARTIFACTS_VIEWER_URL;
+});
 
 describe("viewer URL helpers", () => {
   it("builds the unfiltered feed URL", () => {
