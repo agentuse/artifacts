@@ -205,6 +205,7 @@ The server binds to `127.0.0.1`. To read the feed from a phone, put a private tu
 
 ```bash
 npm install
+npm install --prefix viewer
 npm run build
 npm test
 npm run typecheck

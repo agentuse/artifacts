@@ -13,6 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 - `npm run dev -- <args>` runs the CLI via `tsx` against `src/bin.ts`. Example: `npm run dev -- feed`.
+- `npm install && npm install --prefix viewer` sets up both packages. Run them directly and don't put an install back inside an npm script: npm passes a user-level `allow-scripts` setting to child scripts, and a nested `npm install` then fails with `EALLOWSCRIPTS`. Rerun the second command when `viewer/package-lock.json` changes, since the build no longer installs.
 - `npm run build` builds the viewer first (`viewer/` -> `viewer-dist/`) then compiles the CLI (`src/` -> `dist/`). The viewer must exist before `serve` will start.
 - **The always-on viewer is the pm2 process `agentuse-artifacts`** (`dist/bin.js serve --port 7878`, no watch). It reads `viewer-dist/` per request, so a viewer-only rebuild goes live on reload, but it holds `dist/` in memory: after any `src/` change, `npm run build:cli && pm2 restart agentuse-artifacts`. Otherwise a rebuilt viewer can call routes the old server lacks and artifacts fail to open. Restart through pm2 (no `--update-env`), never `serve --stop`/`--detach` from an agent shell: pm2 holds `ARTIFACTS_CLOUD_URL`/`ARTIFACTS_CLOUD_API_KEY`, agent shells don't.
 - `npm run build:cli` and `npm run build:viewer` run the two halves independently. Touching only `src/` -> rebuild CLI; touching only `viewer/src/` -> rebuild viewer.
