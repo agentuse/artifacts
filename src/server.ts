@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { addComment, commentsFor, commentsStamp, resolveComments } from "./comments.js";
+import { isPinned, pinsStamp, readPins, setPinned } from "./pins.js";
 import { CliError } from "./errors.js";
 import {
   feedEntryRevisions,
@@ -427,7 +428,28 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
     return;
   }
 
-  // /api/feed -> newest-first page plus project/tag facets for the chips.
+  // Pinning rearranges what everyone on the tailnet sees, so it takes the same
+  // gate as every other write: a cross-site page must never reach it.
+  const pinMatch = /^\/api\/entry\/([A-Za-z0-9_]+)\/pin$/.exec(pathname);
+  if (pinMatch && req.method === "POST") {
+    if (!allowShareRequest(req)) {
+      send(res, 403, "Pinning requires a request from the local artifact viewer.");
+      return;
+    }
+    try {
+      const entry = findEntry(pinMatch[1]!);
+      if (!entry) { send(res, 404, "Artifact not found."); return; }
+      const { pinned } = await readJsonBody(req);
+      if (typeof pinned !== "boolean") throw new CliError("INVALID_INPUT", "`pinned` must be true or false.");
+      setPinned(entry, pinned);
+      sendJson(res, { pinned }, { "cache-control": "no-store" });
+    } catch (e) {
+      send(res, e instanceof CliError && e.code === "INVALID_INPUT" ? 400 : 500, (e as Error).message);
+    }
+    return;
+  }
+
+  // /api/feed -> pinned artifacts, a newest-first page, and project/tag facets.
   if (pathname === "/api/feed" && req.method === "GET") {
     try {
       const page = queryFeed({
@@ -436,25 +458,29 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
         q: url.searchParams.get("q") ?? undefined,
         limit: numberParam(url.searchParams.get("limit")),
         cursor: numberParam(url.searchParams.get("cursor")),
+        pins: readPins(),
       });
       const sharingEnabled = isSharingConfigured();
-      const entries = page.entries.map((entry) => ({
+      const withShareState = (entry: FeedEntry) => ({
         ...entry,
         cloudShared: sharingEnabled && sharingState(entry).state !== "share",
-      }));
+      });
+      const entries = page.entries.map(withShareState);
+      const pinned = page.pinned.map(withShareState);
       // A cloud share can be created or revoked without changing the append-only
       // feed. Include the card-level share state so polling does not incorrectly
       // return 304 after that status changes.
       const etag = etagOf(
         feedStamp(),
+        pinsStamp(),
         url.search,
-        entries.map((entry) => `${entry.id}:${entry.cloudShared}`).join(","),
+        [...pinned, ...entries].map((entry) => `${entry.id}:${entry.cloudShared}`).join(","),
       );
       if (req.headers["if-none-match"] === etag) {
         sendNotModified(res, etag, "no-store");
         return;
       }
-      sendJson(res, { ...page, entries: entries.map(publicEntry) }, { etag });
+      sendJson(res, { ...page, entries: entries.map(publicEntry), pinned: pinned.map(publicEntry) }, { etag });
     } catch (e) {
       send(res, 500, (e as Error).message);
     }
@@ -486,7 +512,7 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
         return;
       }
       const sharing = sharingState(entry);
-      const etag = etagOf(feedStamp(), commentsStamp(), entry.id, String(sharingEnabled), JSON.stringify(sharing));
+      const etag = etagOf(feedStamp(), commentsStamp(), pinsStamp(), entry.id, String(sharingEnabled), JSON.stringify(sharing));
       if (req.headers["if-none-match"] === etag) {
         sendNotModified(res, etag, "no-store");
         return;
@@ -495,6 +521,7 @@ export async function handle(req: http.IncomingMessage, res: http.ServerResponse
         entry: publicEntry(entry),
         revisions: feedEntryRevisions(entries, entry.projectId, entry.slug).map(publicEntry),
         comments: commentsFor(entry.projectId, entry.slug),
+        pinned: isPinned(entry),
         sharingEnabled,
         sharing,
       }, { etag });

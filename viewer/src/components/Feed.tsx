@@ -35,6 +35,7 @@ export function Feed(props: {
   const { hidden: headHidden } = useAutoHide({ trackWindow: true, paused: sheet !== null });
   const hasFilter = !!(filter.projectId || filter.tag || filter.q);
   const allCount = page?.all ?? 0;
+  const pinned = page?.pinned ?? [];
   const projectName = page?.projects.find((p) => p.projectId === filter.projectId)?.projectName;
   const setProject = (projectId?: string) => props.onFilterChange({ ...filter, projectId });
   const setTag = (tag?: string) => props.onFilterChange({ ...filter, tag });
@@ -97,7 +98,7 @@ export function Feed(props: {
         <main className="feed-main">
           {props.error && <div className="feed-message error">{props.error}</div>}
 
-          {!props.error && entries.length === 0 && !props.loading && (
+          {!props.error && entries.length === 0 && pinned.length === 0 && !props.loading && (
             <div className="feed-message">
               {hasFilter ? (
                 <>
@@ -115,6 +116,24 @@ export function Feed(props: {
             </div>
           )}
 
+          {pinned.length > 0 && (
+            <section className="pinned-section" aria-label="Pinned">
+              <h2 className="side-heading">Pinned</h2>
+              <div className="cards">
+                {pinned.map((entry) => (
+                  <Card
+                    key={entry.id}
+                    entry={entry}
+                    showProject={!filter.projectId}
+                    onOpen={() => props.onOpen(entry)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {pinned.length > 0 && entries.length > 0 && <h2 className="side-heading">Latest</h2>}
+
           <div className="cards">
             {entries.map((entry) => (
               <Card
@@ -128,7 +147,7 @@ export function Feed(props: {
 
           {page?.nextCursor != null && (
             <button type="button" className="load-more" onClick={props.onLoadMore} disabled={props.loadingMore}>
-              {props.loadingMore ? "Loading…" : `Load more (${page.total - entries.length} left)`}
+              {props.loadingMore ? "Loading…" : `Load more (${page.total - pinned.length - entries.length} left)`}
             </button>
           )}
         </main>

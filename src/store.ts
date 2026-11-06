@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseHtml } from "node-html-parser";
 import { dropProjectComments } from "./comments.js";
+import { dropProjectPins } from "./pins.js";
 import { CliError } from "./errors.js";
 import {
   appendFeedEntry,
@@ -228,6 +229,7 @@ export async function forgetProjectArtifacts(projectId: string): Promise<number>
     }
     writeFeedAtomic(keep);
     dropProjectComments(projectId);
+    dropProjectPins(projectId);
   });
   rmDir(path.join(storeDir(), projectId));
   return dropped;

@@ -43,11 +43,23 @@ export interface FeedQuery {
   cursor?: number;
   /** Include superseded revisions instead of only the newest per slug. */
   allRevisions?: boolean;
+  /** Artifacts to lift out of the paged list into `pinned`, in this order. */
+  pins?: ArtifactRef[];
+}
+
+/** An artifact across all its revisions. */
+export type ArtifactRef = Pick<FeedEntry, "projectId" | "slug">;
+
+export function artifactKey(artifact: ArtifactRef): string {
+  return `${artifact.projectId}\0${artifact.slug}`;
 }
 
 export interface FeedPage {
   entries: FeedEntry[];
+  /** Pins matching the filters, always whole: they sit above the page, outside its cursor. */
+  pinned: FeedEntry[];
   nextCursor: number | null;
+  /** Everything matching the filters, pinned included. */
   total: number;
   projects: Array<{ projectId: string; projectName: string; count: number }>;
   tags: Array<{ tag: string; count: number }>;
@@ -223,13 +235,20 @@ export function queryFeed(query: FeedQuery = {}): FeedPage {
   if (query.tag && !tags.some((t) => t.tag === query.tag)) tags.push({ tag: query.tag, count: 0 });
 
   const filtered = visible.filter((e) => matches(e, query));
+  const pinKeys = (query.pins ?? []).map(artifactKey);
+  const pinKeySet = new Set(pinKeys);
+  const byKey = new Map(filtered.map((e) => [artifactKey(e), e]));
+  const pinned = pinKeys.flatMap((key) => byKey.get(key) ?? []);
+  const unpinned = filtered.filter((e) => !pinKeySet.has(artifactKey(e)));
+
   const limit = clampLimit(query.limit);
   const start = Number.isFinite(query.cursor) && (query.cursor ?? 0) > 0 ? Math.floor(query.cursor!) : 0;
-  const page = filtered.slice(start, start + limit);
-  const nextCursor = start + limit < filtered.length ? start + limit : null;
+  const page = unpinned.slice(start, start + limit);
+  const nextCursor = start + limit < unpinned.length ? start + limit : null;
 
   return {
     entries: page,
+    pinned,
     nextCursor,
     total: filtered.length,
     projects,
@@ -258,7 +277,7 @@ function matches(entry: FeedEntry, query: FeedQuery): boolean {
 export function latestPerSlug(entries: FeedEntry[]): FeedEntry[] {
   const byKey = new Map<string, FeedEntry>();
   for (const entry of entries) {
-    const key = `${entry.projectId}\0${entry.slug}`;
+    const key = artifactKey(entry);
     const cur = byKey.get(key);
     if (!cur || entry.rev > cur.rev) byKey.set(key, entry);
   }

@@ -293,6 +293,7 @@ button, input { font: inherit; color: inherit; }
   flex-direction: column;
   gap: 16px;
 }
+.pinned-section { margin-bottom: 28px; }
 
 .card {
   position: relative;

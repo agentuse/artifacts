@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, ChevronDown, Cloud, Copy, Download, FileText, History, Link, Maximize2, MessageSquare, Minimize2, MoreHorizontal } from "lucide-react";
-import { bundleUrl, fetchEntry, latestTarget, rawUrl, targetPath, type EntryTarget } from "../api";
+import { ArrowLeft, Check, ChevronDown, Cloud, Copy, Download, FileText, History, Link, Maximize2, MessageSquare, Minimize2, MoreHorizontal, Pin, PinOff } from "lucide-react";
+import { bundleUrl, fetchEntry, latestTarget, rawUrl, setEntryPinned, targetPath, type EntryTarget } from "../api";
 import { ArtifactBody, isPlainTextEntry, isTextEntry } from "./Render";
 import { RelativeTime } from "./RelativeTime";
 import { ShareButton } from "./ShareButton";
@@ -16,6 +16,7 @@ export function Detail(props: {
   onBack: () => void;
   onOpenTarget: (target: EntryTarget) => void;
   onFilter: (filter: { projectId?: string; tag?: string }) => void;
+  onPinnedChange: () => void;
 }) {
   const [detail, setDetail] = useState<EntryDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +138,12 @@ export function Detail(props: {
           : [...list, comment],
       };
     });
+  // Refresh the feed too, or going straight back could show the old order for a poll.
+  const togglePinned = async () => {
+    const { pinned } = await setEntryPinned(entry.id, !detail.pinned);
+    setDetail((d) => (d ? { ...d, pinned } : d));
+    props.onPinnedChange();
+  };
   const latest = revisions[0] ?? entry;
   const isLatest = latest.id === entry.id;
   const openRevision = (rev: FeedEntry) =>
@@ -169,6 +176,8 @@ export function Detail(props: {
               setMenuOpen(false);
               setCommentsOpen(true);
             }}
+            pinned={detail.pinned === true}
+            onTogglePinned={togglePinned}
             menuOpen={menuOpen}
             onMenuOpenChange={setMenuOpen}
             onFullscreen={() => {
@@ -249,6 +258,8 @@ function DetailHead(props: {
   sharing?: { state: "share" | "shared" | "update"; url?: string };
   openComments?: number;
   onComments?: () => void;
+  pinned?: boolean;
+  onTogglePinned?: () => Promise<void>;
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
   onFullscreen?: () => void;
@@ -305,10 +316,12 @@ function DetailHead(props: {
           <Maximize2 size={18} strokeWidth={1.75} />
         </button>
       )}
-      {props.entry && (
+      {props.entry && props.onTogglePinned && (
         <Actions
           entry={props.entry}
           isLatest={props.isLatest !== false}
+          pinned={props.pinned === true}
+          onTogglePinned={props.onTogglePinned}
           sharedUrl={props.sharingEnabled && props.sharing?.state !== "share" ? props.sharing?.url : undefined}
           open={!!props.menuOpen}
           onOpenChange={props.onMenuOpenChange ?? (() => {})}
@@ -328,12 +341,15 @@ type CopyState = null | "path" | "content" | "link" | "shared";
 function Actions(props: {
   entry: FeedEntry;
   isLatest: boolean;
+  pinned: boolean;
+  onTogglePinned: () => Promise<void>;
   sharedUrl?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const { open, onOpenChange } = props;
   const [copied, setCopied] = useState<CopyState>(null);
+  const [pinState, setPinState] = useState<"idle" | "saving" | "failed">("idle");
   const rootRef = useRef<HTMLDivElement>(null);
   const filename = props.entry.entry.split("/").pop() || props.entry.entry;
   const setOpen = onOpenChange;
@@ -367,6 +383,18 @@ function Actions(props: {
     }
   };
 
+  // A failed pin keeps the menu open and says so, rather than looking like it worked.
+  const togglePinned = async () => {
+    setPinState("saving");
+    try {
+      await props.onTogglePinned();
+      setPinState("idle");
+      setOpen(false);
+    } catch {
+      setPinState("failed");
+    }
+  };
+
   return (
     <div className="action-menu" ref={rootRef}>
       <button
@@ -384,6 +412,17 @@ function Actions(props: {
           <div className="action-menu-title" aria-hidden="true">
             {props.entry.title} · rev {props.entry.rev}
           </div>
+          <button
+            type="button"
+            role="menuitem"
+            className="action-menu-item"
+            disabled={pinState === "saving"}
+            onClick={() => void togglePinned()}
+          >
+            {props.pinned ? <PinOff size={14} strokeWidth={2} /> : <Pin size={14} strokeWidth={2} />}
+            <span>{props.pinned ? "Unpin" : "Pin to top of feed"}</span>
+            {pinState === "failed" && <span className="action-menu-hint">Failed, try again</span>}
+          </button>
           <button
             type="button"
             role="menuitem"

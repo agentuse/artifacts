@@ -15,6 +15,10 @@ export function feedPath(): string {
 export function commentsPath(): string {
   return path.join(rootDir(), "comments.jsonl");
 }
+/** Append-only pin log. A pin outlives any one revision, so it isn't feed state. */
+export function pinsPath(): string {
+  return path.join(rootDir(), "pins.jsonl");
+}
 /** Root of the copied artifact bundles: store/<projectId>/<slug>/<rev>/. */
 export function storeDir(): string {
   return path.join(rootDir(), "store");

@@ -36,7 +36,10 @@ export interface FeedEntry {
 
 export interface FeedPage {
   entries: FeedEntry[];
+  /** Pins matching the filters, kept out of `entries`. Missing from a server older than this viewer. */
+  pinned?: FeedEntry[];
   nextCursor: number | null;
+  /** Everything matching the filters, pinned included. */
   total: number;
   projects: Array<{ projectId: string; projectName: string; count: number }>;
   tags: Array<{ tag: string; count: number }>;
@@ -67,6 +70,7 @@ export interface EntryDetail {
   entry: FeedEntry;
   revisions: FeedEntry[];
   comments?: Comment[];
+  pinned?: boolean;
 }
 
 export interface ManagedShare {

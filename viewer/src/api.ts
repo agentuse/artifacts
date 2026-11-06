@@ -126,7 +126,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   if (response.headers.get("content-type")?.includes("text/html")) {
-    throw new Error("The artifact server is out of date. Rebuild and restart it to enable comments.");
+    throw new Error("The artifact server is out of date. Rebuild and restart it.");
   }
   if (!response.ok) throw new Error(await response.text());
   return response.json() as Promise<T>;
@@ -138,6 +138,10 @@ export function postComment(entryId: string, body: string, quote?: CommentQuote)
 
 export function resolveComment(id: string): Promise<Comment> {
   return postJson(`/api/comments/${encodeURIComponent(id)}/resolve`, {});
+}
+
+export function setEntryPinned(entryId: string, pinned: boolean): Promise<{ pinned: boolean }> {
+  return postJson(`/api/entry/${encodeURIComponent(entryId)}/pin`, { pinned });
 }
 
 const managementHeaders = { "content-type": "application/json", "x-artifacts-share": "1" };

@@ -54,6 +54,7 @@ export function App() {
     fetch("/api/sharing", { cache: "no-store" }).then(r => r.json()).then(value => setSharingEnabled(value.enabled === true)).catch(() => {});
   }, []);
   const etagRef = useRef<string | null>(null);
+  const refreshFeedRef = useRef<() => void>(() => {});
 
   const navigate = useCallback((next: Route, replace = false) => {
     setRoute(next);
@@ -95,6 +96,7 @@ export function App() {
       }
     };
 
+    refreshFeedRef.current = () => void tick();
     void tick();
     const id = window.setInterval(tick, POLL_MS);
     return () => {
@@ -146,6 +148,7 @@ export function App() {
           onBack={() => navigate({ filter: route.filter })}
           onOpenTarget={(detail) => navigate({ detail, filter: route.filter }, true)}
           onFilter={(filter) => navigate({ filter })}
+          onPinnedChange={() => refreshFeedRef.current()}
         />
       </div>
     );
