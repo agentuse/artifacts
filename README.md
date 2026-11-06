@@ -177,6 +177,8 @@ Every command supports `--json`.
 | --- | --- |
 | `artifacts submit <path> [--title T] [--tag T...] [--slug S] [--open]` | Copy a file or directory into the store and add it to the feed. Prints the URL. |
 | `artifacts feed [--project ID] [--tag T] [--limit N] [--all-revisions]` | List submitted artifacts, newest first. |
+| `artifacts comments [slug] [--project ID] [--all]` | List open comments the user left in the viewer. `--all` includes resolved ones. |
+| `artifacts resolve <id...>` | Mark comments as dealt with. |
 | `artifacts import [dir]` | Submit everything already in the project-local `<dir>/.agentuse/artifacts/`. |
 | `artifacts prune [--keep N]` | Delete superseded revisions from the store (default: keep 5). |
 | `artifacts open [--port N] [--detach] [--no-browser]` | Start or reuse the viewer and open this project's feed. |
